@@ -1,0 +1,4 @@
+TMDB_SECRET_KEYS = {
+    "TMDB_API_KEY": 'TMDB_API_KEY',
+    "TMDB_URL": 'TMDB_URL'
+}

@@ -14,6 +14,8 @@ def make_request(
     """
     # Normalize method to uppercase
     method = method.upper()
+
+    print({"method": method, "url": url, "params": params, "body": body})
     
     try:
         response = requests.request(

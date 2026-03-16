@@ -22,8 +22,12 @@ def is_valid_uuid(uuid_to_test: str, version: int = 4) -> bool:
     return str(uuid_obj) == uuid_to_test.lower()
 
 def convert_string_to_uuid(string: str) -> str:
-    if(not is_valid_uuid(string)):
-        raise f"{string} cannot be massaged to UUID format"
+    if(not string or len(string) != 32):
+        raise Exception(f"{string} cannot be massaged to UUID format")
+    
+    if(is_valid_uuid(string)):
+        return string
+
     
     return f"{string[0:8]}-{string[8:12]}-{string[12:16]}-{string[16:20]}-{string[20:]}"
 

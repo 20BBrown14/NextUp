@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from constants.jellyfin import WEBHOOK_NOTIFICATION_TYPES, SUPPORTED_WEBHOOK_NOTIFICATION_TYPES
 from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service
 from utils import load_env
+from NextUp import start_main_loop, NextUp
+
 
 class JellyfinWebhook(BaseModel):
     ServerId: str | None = None
@@ -41,17 +43,24 @@ class JellyfinWebhook(BaseModel):
     NotificationUsername: str | None = None
     UserId: str | None = None
 
-app = FastAPI()
+async def lifespan(app: FastAPI):
+    load_env.load_env()
+    scheduler = start_main_loop()
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 router = APIRouter()
+
+@router.post("/recommendations/run")
+async def run_all_recommendations(request: Request):
+    NextUp()
 
 @router.post("/webhook/jellyfin/")
 async def webhook_test(request: Request):
-    load_env.load_env()
     raw_request_body = await request.json()
     request_body = JellyfinWebhook(**raw_request_body)
-    print(request_body.ServerId)
     tmdb_id, request_user_id, favorite, notification_type, item_type, item_id = request_body.Provider_tmdb, request_body.UserId, request_body.Favorite, request_body.NotificationType, request_body.ItemType, request_body.ItemId
-    print(tmdb_id, request_user_id, favorite, notification_type, item_type)
 
     if(notification_type not in SUPPORTED_WEBHOOK_NOTIFICATION_TYPES):
         raise HTTPException(status_code=400, detail=f"Got unexpected notification type: {notification_type}")
@@ -85,9 +94,9 @@ async def webhook_test(request: Request):
 
     media_request = seerr_api_service.make_media_request(int(tmdb_id), request_user['id'], 'movie' if item_type.lower() == 'movie' else 'tv')
     print(f"Request for tmdb id {tmdb_id} created with id {media_request['id']}")
-    
+
     jellyfin_api_service.delete_item_by_id(item_id)
     return {"message": "Success"}
 
-
+# if __name__ == "__main__":
 app.include_router(router)

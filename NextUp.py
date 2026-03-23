@@ -59,7 +59,7 @@ def generateMovieRecommendations(user: UserDto, min_watch_percent: float, max_da
 def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_recos: int):
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
-    all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")), SERIES_LIBRARY_IDS)
+    all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")))
     watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback)
 
     series_recos = []
@@ -90,10 +90,11 @@ def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_rec
             filesystem.create_directory(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{dir_name}/Season 00")
             filesystem.create_hard_link(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/NextUp/movie.mp4", f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{dir_name}/Season 00/S00E9999.mp4")
 
+def log_time():
+    print(f"Generating recommendations at {time.strftime('%H:%M:%S')}")
 
-def main():
+def NextUp():
     global ROOT_RECOMMENDATIONS_DIR_PATH
-    load_env.load_env()
     ROOT_RECOMMENDATIONS_DIR_PATH = os.environ.get(CONFIG_KEYS["NEXTUP_RECOMMENDATIONS_DIR"])
     GENERATE_RECOS_FOR = [name.lower() for name in os.environ.get(CONFIG_KEYS["GENERATE_RECOS_FOR"]).rsplit(',')]
     MIN_MOVIE_WATCH_PERCENT = os.environ.get(CONFIG_KEYS["MIN_MOVIE_WATCH_PERCENT"])
@@ -125,25 +126,22 @@ def main():
         else:
             print("Series recommendations are disabled. Skipping.")
 
-def _temp_task():
-    print(f"Task executed at {time.strftime('%H:%M:%S')}")
-
 def start_main_loop():
+    time.tzset()
+    RECOMMENDATIONS_CRON_SCHEDULE = os.environ.get(CONFIG_KEYS["RECOMMENDATIONS_CRON_SCHEDULE"])
+    if not RECOMMENDATIONS_CRON_SCHEDULE:
+        print("Found no cron schedule for recommendations. Not starting recommendations engine.")
+        return None
+    else:
+        print(f"Using {RECOMMENDATIONS_CRON_SCHEDULE} cron schedule")
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(
-        _temp_task,
-        CronTrigger.from_crontab('* * * * *'),
+        NextUp,
+        CronTrigger.from_crontab(RECOMMENDATIONS_CRON_SCHEDULE),
         id="recos"
     )
 
     scheduler.start()
 
-# if __name__ == "__main__":
-#     # load_env.load_env()
-#     # seerr_users = seerr_api_service.get_seerr_users()
-#     # print(seerr_users)
-#     # finnley_user = next(user for user in seerr_users if user['displayName'].lower() == 'finnley')
-#     # print(finnley_user)
-#     # request = seerr_api_service.make_media_request(295357, finnley_user['id'], 'tv')
-#     # print(request)
-#     main() 
+    return scheduler

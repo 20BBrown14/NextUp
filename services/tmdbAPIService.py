@@ -2,7 +2,7 @@ import os
 import requests
 from utils.fetch import make_request
 from typing import List, Optional, Dict, Any, Literal
-from schemas.tmdb.models import TMDBRecommendation
+from schemas.tmdb.models import TMDBMovieRecommendation, TMDBSeriesRecommendation
 from constants.tmdb import TMDB_SECRET_KEYS
 
 def _make_authenticated_tmdb_api_request(
@@ -23,7 +23,7 @@ def _make_authenticated_tmdb_api_request(
     }
     return make_request(request_url, method, params, body, headers, timeout)
 
-def get_recommendations_by_id(type: Literal['movie', 'tv'], id: str, pages: int = 3, sort_by: str = 'vote_average', sort_dir: str = 'desc', min_vote_count=10) -> List[TMDBRecommendation]:
+def get_recommendations_by_id(type: Literal['movie', 'tv'], id: str, pages: int = 3, sort_by: str = 'vote_average', sort_dir: str = 'desc', min_vote_count=10) -> List[TMDBMovieRecommendation | TMDBSeriesRecommendation]:
     if not type or not type in ['movie', 'tv']:
         raise Exception(f"Type must be provided and be one of: [movie, tv]. Got {type}")
     
@@ -40,6 +40,6 @@ def get_recommendations_by_id(type: Literal['movie', 'tv'], id: str, pages: int 
         unsorted_recommendations.extend(raw_recommendations)
 
     sorted_recommendations = sorted(unsorted_recommendations, key=lambda x: x[sort_by], reverse=True if sort_dir == 'desc' else False)
-    filtered_recos: List[TMDBRecommendation] = [reco for reco in sorted_recommendations if reco['vote_count'] >= min_vote_count]
+    filtered_recos: List[TMDBMovieRecommendation | TMDBSeriesRecommendation] = [reco for reco in sorted_recommendations if reco['vote_count'] >= min_vote_count]
     
     return filtered_recos

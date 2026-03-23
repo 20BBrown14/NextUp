@@ -2,10 +2,11 @@ import requests
 import os
 from constants.jellyfin import JELLYFIN_SECRET_KEYS
 from utils.fetch import make_request
-from utils.helpers import parse_jellyfin_date
+from utils.helpers import parse_jellyfin_date, convert_string_to_uuid
 from schemas.jellyfin.models import UserDto, BaseItemDto
 from typing import Optional, Dict, Any, List, cast, NamedTuple
 from datetime import date, timedelta, datetime
+from constants.config import CONFIG_KEYS
 
 class Series(NamedTuple):
         name: str
@@ -160,29 +161,72 @@ def get_all_user_movies(user_id: str, max_days: int = None, min_progress_percent
 
     return [Movie(*movie) for movie in deduplicated_user_movie_list]
 
-def get_all_available_movies() -> List[str]:
+def get_all_available_movies(user_id: str = None) -> List[str]:
+    RAW_MOVIE_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["MOVIE_LIBRARY_IDS"])
+    MOVIE_LIBRARY_IDS = RAW_MOVIE_LIBRARY_IDS.rsplit(',') if RAW_MOVIE_LIBRARY_IDS else []
+
     params = {
         "Recursive": True,
         "IncludeItemTypes": "Movie",
-        "Fields": "ProviderIds"
+        "Fields": "ProviderIds,ParentId"
     }
+
+    url = ''
+    if user_id == None:
+        url = 'Items'
+    else:
+        url = f"Users/{user_id}/Items"
+
+    raw_movie_list = []
+    if len(MOVIE_LIBRARY_IDS):
+        for id in MOVIE_LIBRARY_IDS:
+            extended_params = {**params, "ParentId": id}
+            response = _make_authenticated_jellyfin_api_request(url, params=extended_params).json().get("Items", [])
+            raw_movie_list.extend(response)
+    else:
+        response = _make_authenticated_jellyfin_api_request(url, params=params).json().get("Items", [])
+        raw_movie_list.extend(response) 
     
-    raw_movie_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
     movie_list = cast(List[BaseItemDto], raw_movie_list)
     movie_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in movie_list]
-    return [id for id in movie_tmdb_id_list if id is not None]
+    return [int(id) for id in movie_tmdb_id_list if id is not None]
 
-def get_all_available_series() -> List[str]:
+def get_all_available_series(user_id: str = None) -> List[str]:
+    RAW_SERIES_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["SERIES_LIBRARY_IDS"])
+    SERIES_LIBRARY_IDS = RAW_SERIES_LIBRARY_IDS.rsplit(',') if RAW_SERIES_LIBRARY_IDS else []
+
     params = {
         "Recursive": True,
         "IncludeItemTypes": "Series",
         "Fields": "ProviderIds"
     }
+
+    url = ''
+    if user_id == None:
+        url = 'Items'
+    else:
+        url = f"Users/{user_id}/Items"
+
+    raw_series_list = []
+    if len(SERIES_LIBRARY_IDS):
+        for id in SERIES_LIBRARY_IDS:
+            extended_params = {**params, "ParentId": id}
+            response = _make_authenticated_jellyfin_api_request(url, params=extended_params).json().get("Items", [])
+            raw_series_list.extend(response)
+    else:
+        response = _make_authenticated_jellyfin_api_request(url, params=params).json().get("Items", [])
+        raw_series_list.extend(response) 
+
     
-    raw_series_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
     series_list = cast(List[BaseItemDto], raw_series_list)
     series_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in series_list]
-    return [id for id in series_tmdb_id_list if id is not None]
+    return [int(id) for id in series_tmdb_id_list if id is not None]
+
+def delete_item_by_id(item_id: str):
+    if not item_id:
+        return
+    
+    return _make_authenticated_jellyfin_api_request(f"Items/{convert_string_to_uuid(item_id)}", method='DELETE')
 
 
 

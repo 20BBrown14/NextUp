@@ -82,4 +82,8 @@ def get_all_dirs_in_dir(path: str) -> List[str]:
 def recursively_rm_dir(path: str) -> None:
     path = Path(path)
     if path.exists() and path.is_dir():
-        path.rmdir(recursive=True)
+        shutil.rmtree(path)
+
+def does_path_exist(path: str) -> bool:
+    path = Path(path)
+    return path.exists()

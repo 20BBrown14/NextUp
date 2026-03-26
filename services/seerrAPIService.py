@@ -12,7 +12,7 @@ def _make_authenticated_seerr_api_request(
     params: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
     headers: Optional[Dict[str, Any]] = None,
-    timeout: int = 10
+    timeout: int = 30
 ) -> requests.Response:
     SEERR_API_KEY = os.environ.get(SEERR_SECRET_KEYS["SEERR_API_KEY"])
     SEERR_URL = os.environ.get(SEERR_SECRET_KEYS["SEERR_URL"])

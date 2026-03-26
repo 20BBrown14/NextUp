@@ -7,15 +7,16 @@ def make_request(
     params: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
     headers: Optional[Dict[str, Any]] = None,
-    timeout: int = 10
+    timeout: int = 30,
+    should_log: bool = True
 ) -> requests.Response:
     """
     A generic wrapper for the requests library.
     """
     # Normalize method to uppercase
     method = method.upper()
-
-    print({"method": method, "url": url, "params": params, "body": body})
+    if should_log:
+        print({"method": method, "url": url, "params": params, "body": body})
     
     try:
         response = requests.request(

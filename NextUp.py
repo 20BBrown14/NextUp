@@ -1,6 +1,7 @@
-from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, seerrAPIService as seerr_api_service
+from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, watchstateAPIService as watchstate_api_service
 from utils import load_env, helpers, filesystem
 from constants.config import CONFIG_KEYS
+from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from adapters import jellyfin as jellyfin_adapter
 import os
 from datetime import datetime
@@ -26,7 +27,13 @@ def generateMovieRecommendations(user: UserDto, min_watch_percent: float, max_da
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
     all_user_movie_ids = jellyfin_api_service.get_all_available_movies(helpers.convert_string_to_uuid(user.get("Id")))
-    watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
+
+    watched_movies = None
+    if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
+        watched_movies = watchstate_api_service.get_user_watched_movies(user.get('Name').lower(), max_days_lookback)
+    else:
+        watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
+
     movie_recos = []
     for movie in watched_movies:
         recos = tmdb_api_service.get_recommendations_by_id('movie', movie.tmdb_id, sort_by='popularity', pages=math.ceil(max_recos/20))
@@ -60,7 +67,12 @@ def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_rec
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
     all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")))
-    watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback)
+    
+    watched_series = None
+    if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
+        watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback)
+    else:
+        watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback)
 
     series_recos = []
     for series in watched_series:

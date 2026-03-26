@@ -11,7 +11,7 @@ def _make_authenticated_tmdb_api_request(
     params: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
     headers: Optional[Dict[str, Any]] = None,
-    timeout: int = 10
+    timeout: int = 30
 ) -> requests.Response:
     TMDB_API_KEY = os.environ.get(TMDB_SECRET_KEYS["TMDB_API_KEY"])
     TMDB_URL = os.environ.get(TMDB_SECRET_KEYS["TMDB_URL"])

@@ -24,7 +24,7 @@ def _make_authenticated_jellyfin_api_request(
     params: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
     headers: Optional[Dict[str, Any]] = None,
-    timeout: int = 10
+    timeout: int = 30
 ) -> requests.Response:
     JELLYFIN_API_KEY = os.environ.get(JELLYFIN_SECRET_KEYS["JELLYFIN_API_KEY"])
     JELLYFIN_URL = os.environ.get(JELLYFIN_SECRET_KEYS["JELLYFIN_URL"])

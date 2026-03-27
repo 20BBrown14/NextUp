@@ -5,7 +5,7 @@ from utils.fetch import make_request
 from utils.helpers import parse_jellyfin_date, convert_string_to_uuid
 from schemas.jellyfin.models import UserDto, BaseItemDto
 from typing import Optional, Dict, Any, List, cast, NamedTuple
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 from constants.config import CONFIG_KEYS
 
 class Series(NamedTuple):
@@ -191,7 +191,7 @@ def get_all_available_movies(user_id: str = None) -> List[str]:
     movie_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in movie_list]
     return [int(id) for id in movie_tmdb_id_list if id is not None]
 
-def get_all_available_series(user_id: str = None) -> List[str]:
+def get_all_available_series(user_id: str = None) -> List[int]:
     RAW_SERIES_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["SERIES_LIBRARY_IDS"])
     SERIES_LIBRARY_IDS = RAW_SERIES_LIBRARY_IDS.rsplit(',') if RAW_SERIES_LIBRARY_IDS else []
 

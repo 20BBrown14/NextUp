@@ -1,7 +1,6 @@
 
 
 def load_env():
-    import os
     import sys
     from os.path import join, dirname
     from dotenv import load_dotenv

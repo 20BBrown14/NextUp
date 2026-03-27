@@ -1,20 +1,10 @@
 import uuid
-from datetime import datetime
-
 
 def is_valid_uuid(uuid_to_test: str, version: int = 4) -> bool:
-    """
-    Check if a string is a valid UUID.
-    
-    Args:
-        uuid_to_test: The string to check.
-        version: The UUID version to validate against (1, 3, 4, or 5).
-    """
     try:
         # Attempt to create a UUID object
         uuid_obj = uuid.UUID(uuid_to_test, version=version)
     except ValueError:
-        # If it's not a valid hex string for a UUID, it raises a ValueError
         return False
 
     # Check if the string representation matches the UUID object

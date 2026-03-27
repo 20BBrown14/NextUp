@@ -20,14 +20,6 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# ARG PUID
-# ARG PGID
-
-# # Create a non-privileged user that the app will run under.
-# # See https://docs.docker.com/go/dockerfile-user-best-practices/
-# RUN groupadd -g ${PGID} realuser && useradd -l -u ${PUID} -g realuser -m realuser
-
-
 # Download dependencies as a separate step to take advantage of Docker's caching.
 # Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
 # Leverage a bind mount to requirements.txt to avoid having to copy them into
@@ -36,8 +28,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     python -m pip install -r requirements.txt
 
-
-# USER realuser
 
 # Copy the source code into the container.
 COPY . .

@@ -1,18 +1,9 @@
 from pathlib import Path
-from typing import Union, Optional, List
+from typing import Union, List
 import json
 import shutil
 
 def create_directory(target_path: Union[str, Path]) -> Path:
-    """
-    Creates an arbitrary directory at the specified location.
-    
-    Args:
-        target_path: The string or Path object representing the desired directory.
-        
-    Returns:
-        The Path object of the created (or existing) directory.
-    """
     # Convert string to a Path object if it isn't one already
     path_obj = Path(target_path).resolve()
     
@@ -23,7 +14,6 @@ def create_directory(target_path: Union[str, Path]) -> Path:
     return path_obj
 
 def save_json(filepath, data):
-    """Saves a dictionary or list as a JSON file."""
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -33,12 +23,6 @@ def save_json(filepath, data):
 import json
 
 def read_json(filepath):
-    """
-    Reads a JSON file and returns the data as a Python object.
-    
-    :param filepath: Path to the .json file
-    :return: Dictionary or List (depending on JSON structure)
-    """
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)

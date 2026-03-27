@@ -1,8 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, HTTPException
-from typing import Any, Optional, cast
 from pydantic import BaseModel
 from constants.jellyfin import WEBHOOK_NOTIFICATION_TYPES, SUPPORTED_WEBHOOK_NOTIFICATION_TYPES
-from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service, watchstateAPIService as watchstate_api_service
+from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service
 from utils import load_env
 from NextUp import start_main_loop, NextUp
 
@@ -46,14 +45,9 @@ class JellyfinWebhook(BaseModel):
 async def lifespan(app: FastAPI):
     load_env.load_env()
 
-    # scheduler = start_main_loop()
-    # yield
-    # scheduler.shutdown()
-
-    # data = watchstate_api_service.get_user_watched_movies('admin')
-    # print(data)
-    NextUp()
+    scheduler = start_main_loop()
     yield
+    scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)
 router = APIRouter()
@@ -108,5 +102,4 @@ async def webhook_test(request: Request):
     jellyfin_api_service.delete_item_by_id(item_id)
     return {"message": "Success"}
 
-# if __name__ == "__main__":
 app.include_router(router)

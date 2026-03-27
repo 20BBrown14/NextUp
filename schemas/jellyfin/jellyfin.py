@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from typing import List, Optional, TypedDict
+from typing import List
 
 class JellyfinMetadata:
     mediaType: int

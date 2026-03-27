@@ -1,11 +1,10 @@
 from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, watchstateAPIService as watchstate_api_service
-from utils import load_env, helpers, filesystem
+from utils import helpers, filesystem
 from constants.config import CONFIG_KEYS
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from adapters import jellyfin as jellyfin_adapter
 import os
 from datetime import datetime
-from typing import List
 from schemas.jellyfin.models import UserDto
 import math
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -33,6 +32,9 @@ def generateMovieRecommendations(user: UserDto, min_watch_percent: float, max_da
         watched_movies = watchstate_api_service.get_user_watched_movies(user.get('Name').lower(), max_days_lookback)
     else:
         watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
+
+    all_user_movie_ids.extend([series.tmdb_id for series in watched_movies])
+    all_user_movie_ids = list(set(all_user_movie_ids))
 
     movie_recos = []
     for movie in watched_movies:
@@ -73,6 +75,10 @@ def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_rec
         watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback)
     else:
         watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback)
+
+    # all_user_series_ids might not include all series user has actually watched for the purpose of removing recommendations user has already watched
+    all_user_series_ids.extend([series.tmdb_id for series in watched_series])
+    all_user_series_ids = list(set(all_user_series_ids))
 
     series_recos = []
     for series in watched_series:

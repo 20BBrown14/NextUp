@@ -2,11 +2,10 @@ import requests
 import os
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from utils.fetch import make_request
-from utils.helpers import parse_jellyfin_date, convert_string_to_uuid
+from utils.helpers import parse_jellyfin_date
 from schemas.watchstate.watchstate import WatchStateHistory
 from typing import Optional, Dict, Any, List, cast, NamedTuple
-from datetime import date, timedelta, datetime
-from constants.config import CONFIG_KEYS
+from datetime import date, timedelta
 
 class Series(NamedTuple):
         name: str
@@ -146,7 +145,7 @@ def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = No
     return movies
 
 # returns a list of Series
-def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = None) -> List[int]:
+def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = None) -> List[Series]:
     WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP = os.environ.get(WATCHSTATE_SECRET_KEYS["WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP"])
     headers = {
         'X-User': jellyfin_user_name if jellyfin_user_name != WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP else 'main'

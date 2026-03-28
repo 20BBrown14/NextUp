@@ -9,7 +9,7 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 - Optional Seerr integration
 
 ## How It Works
-NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a folder specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. 
+NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. 
 
 If the Seerr integration is enabled in NextUp users can favorite media from their recommendations to automatically request it for download in Seerr. Note that due to the way Seerr's api is implemented [all requests are auto-approved](https://github.com/seerr-team/seerr/issues/2678#issuecomment-4038790777).
 

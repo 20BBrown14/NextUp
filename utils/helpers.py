@@ -28,3 +28,4 @@ def parse_jellyfin_date(date_str: str):
     clean_str = f"{date_str.split('T')[0]}"
     return clean_str
 
+

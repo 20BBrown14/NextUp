@@ -2,6 +2,9 @@ from pathlib import Path
 from typing import Union, List
 import json
 import shutil
+from utils import logger
+
+logger = logger.get_logger(__name__)
 
 def create_directory(target_path: Union[str, Path]) -> Path:
     # Convert string to a Path object if it isn't one already
@@ -18,7 +21,7 @@ def save_json(filepath, data):
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        print(f"Error saving JSON: {e}")
+        logger.error(f"Error saving JSON: {e}")
 
 import json
 
@@ -28,10 +31,10 @@ def read_json(filepath):
             data = json.load(f)
         return data
     except FileNotFoundError:
-        print(f"Error: The file {filepath} was not found.")
+        logger.error(f"Error: The file {filepath} was not found.")
         return None
     except json.JSONDecodeError:
-        print(f"Error: Failed to decode JSON. Check if the file format is valid.")
+        logger.error(f"Error: Failed to decode JSON. Check if the file format is valid.")
         return None
     
 def create_hard_link(src: str, dest: str) -> None:
@@ -48,7 +51,7 @@ def create_hard_link(src: str, dest: str) -> None:
         return
     except OSError as e:
         if e.errno == 18: # Cross-device link error code
-            print("Cannot create hard link across different drives.")
+            logger.error("Cannot create hard link across different drives.")
         raise
 
 def copy_file(src: str, dest: str) -> None:

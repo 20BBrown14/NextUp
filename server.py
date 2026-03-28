@@ -4,7 +4,9 @@ from constants.jellyfin import WEBHOOK_NOTIFICATION_TYPES, SUPPORTED_WEBHOOK_NOT
 from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service
 from utils import load_env
 from NextUp import start_main_loop, NextUp
+from utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 class JellyfinWebhook(BaseModel):
     ServerId: str | None = None
@@ -71,12 +73,12 @@ async def webhook_test(request: Request):
     
     match notification_type:
         case 'UserDataSaved':
-            print(f"Got {notification_type} event.")
+            logger.info(f"Got {notification_type} event.")
         case _:
             raise HTTPException(status_code=500, detail="An unrecoverable server error occured. Please try again later.")
         
     if not favorite:
-        print("Got event for user removing media from favorites. Ignoring.")
+        logger.info("Got event for user removing media from favorites. Ignoring.")
         return 
     
     media_type_tmdb_ids = []
@@ -86,18 +88,18 @@ async def webhook_test(request: Request):
         media_type_tmdb_ids = jellyfin_api_service.get_all_available_series()
 
     if int(tmdb_id) in media_type_tmdb_ids:
-        print(f"TMDB ID {tmdb_id} is already available on server.")
+        logger.info(f"TMDB ID {tmdb_id} is already available on server.")
         return {"message": "Success"}        
     
     seerr_users = seerr_api_service.get_seerr_users()
     request_user = next(user for user in seerr_users if user['jellyfinUserId'] == request_user_id)
 
     if not request_user:
-        print(f"Unable to find seerr user with Jellyfin user id {request_user_id}")
+        logger.error(f"Unable to find seerr user with Jellyfin user id {request_user_id}")
         raise HTTPException(status_code=400, detail=f"Unable to find seerr user with Jellyfin user id {request_user_id}")
 
     media_request = seerr_api_service.make_media_request(int(tmdb_id), request_user['id'], 'movie' if item_type.lower() == 'movie' else 'tv')
-    print(f"Request for tmdb id {tmdb_id} created with id {media_request['id']}")
+    logger.info(f"Request for tmdb id {tmdb_id} created with id {media_request['id']}")
 
     jellyfin_api_service.delete_item_by_id(item_id)
     return {"message": "Success"}

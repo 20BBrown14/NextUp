@@ -1,5 +1,8 @@
 import requests
 from typing import Optional, Dict, Any
+from utils import logger
+
+logger = logger.get_logger(__name__)
 
 def make_request(
     url: str,
@@ -15,7 +18,7 @@ def make_request(
     """
     method = method.upper()
     if should_log:
-        print({"method": method, "url": url, "params": params, "body": body})
+        logger.info({"method": method, "url": url, "params": params, "body": body})
     
     try:
         response = requests.request(
@@ -31,5 +34,5 @@ def make_request(
         return response
 
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred during the {method} request to {url}: {e}")
+        logger.error(f"An error occurred during the {method} request to {url}: {e}")
         raise

@@ -1,5 +1,5 @@
 from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, watchstateAPIService as watchstate_api_service
-from utils import helpers, filesystem
+from utils import helpers, filesystem, logger
 from constants.config import CONFIG_KEYS
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from adapters import jellyfin as jellyfin_adapter
@@ -11,6 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import time
 
+logger = logger.get_logger(__name__)
 
 ROOT_RECOMMENDATIONS_DIR_PATH = None
 
@@ -109,7 +110,7 @@ def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_rec
             filesystem.create_hard_link(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/NextUp/movie.mp4", f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{dir_name}/Season 00/S00E9999.mp4")
 
 def log_time():
-    print(f"Generating recommendations at {time.strftime('%H:%M:%S')}")
+    logger.info(f"Generating recommendations at {time.strftime('%H:%M:%S')}")
 
 def NextUp():
     global ROOT_RECOMMENDATIONS_DIR_PATH
@@ -137,21 +138,21 @@ def NextUp():
         if not DISABLE_MOVIE_RECOMMENDATIONS:
             generateMovieRecommendations(user, float(MIN_MOVIE_WATCH_PERCENT), int(MAX_MOVIE_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_MOVIE))
         else:
-            print("Movie recommendations are disabled. Skipping.")
+            logger.info("Movie recommendations are disabled. Skipping.")
         
         if not DISABLE_SERIES_RECOMMENDATIONS:
             generateSeriesRecommendations(user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES))
         else:
-            print("Series recommendations are disabled. Skipping.")
+            logger.info("Series recommendations are disabled. Skipping.")
 
 def start_main_loop():
     time.tzset()
     RECOMMENDATIONS_CRON_SCHEDULE = os.environ.get(CONFIG_KEYS["RECOMMENDATIONS_CRON_SCHEDULE"])
     if not RECOMMENDATIONS_CRON_SCHEDULE:
-        print("Found no cron schedule for recommendations. Not starting recommendations engine.")
+        logger.info("Found no cron schedule for recommendations. Not starting recommendations engine.")
         return None
     else:
-        print(f"Using {RECOMMENDATIONS_CRON_SCHEDULE} cron schedule")
+        logger.info(f"Using {RECOMMENDATIONS_CRON_SCHEDULE} cron schedule")
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(

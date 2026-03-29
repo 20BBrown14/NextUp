@@ -3,7 +3,7 @@
 config.env
 *.code-workspace
 **/*__pycache__
-./.vscode
+.vscode
 compose.yaml
 
 # Byte-compiled / optimized / DLL files

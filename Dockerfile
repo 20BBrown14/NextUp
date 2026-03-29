@@ -33,7 +33,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY . .
 
 # Expose the port that the application listens on.
-EXPOSE 5777
+ENV APP_HOST=0.0.0.0
+ENV APP_PORT=5777
+EXPOSE $APP_PORT
 
 # Run the application.
-CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0", "--port", "5777"]
+CMD fastapi run server.py --host ${APP_HOST} --port ${APP_PORT}

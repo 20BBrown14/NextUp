@@ -5,6 +5,7 @@ from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService
 from utils import load_env
 from NextUp import start_main_loop, NextUp
 from utils.logger import get_logger
+import os
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,14 @@ async def run_all_recommendations(request: Request):
 
 @router.post("/webhook/jellyfin/")
 async def webhook_test(request: Request):
+    SEERR_API_KEY = os.environ.get(SEERR_SECRET_KEYS["SEERR_API_KEY"])
+    SEERR_URL = os.environ.get(SEERR_SECRET_KEYS["SEERR_URL"])
+    if not SEERR_URL and not SEERR_API_KEY:
+        return
+    
+    if not SEERR_URL or not SEERR_API_KEY:
+        raise HTTPException(status_code=500, detail="SEERR_URL and SEERR_API_KEY are both required to enable requests from favorites")
+
     raw_request_body = await request.json()
     request_body = JellyfinWebhook(**raw_request_body)
     tmdb_id, request_user_id, favorite, notification_type, item_type, item_id = request_body.Provider_tmdb, request_body.UserId, request_body.Favorite, request_body.NotificationType, request_body.ItemType, request_body.ItemId

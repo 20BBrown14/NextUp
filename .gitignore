@@ -5,6 +5,7 @@ config.env
 **/*__pycache__
 .vscode
 compose.yaml
+todo.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

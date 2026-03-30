@@ -14,7 +14,7 @@ def _make_authenticated_tmdb_api_request(
     timeout: int = 30
 ) -> requests.Response:
     TMDB_API_KEY = os.environ.get(TMDB_SECRET_KEYS["TMDB_API_KEY"])
-    TMDB_URL = os.environ.get(TMDB_SECRET_KEYS["TMDB_URL"])
+    TMDB_URL = os.environ.get(TMDB_SECRET_KEYS["TMDB_URL"], 'https://api.themoviedb.org/3')
 
     request_url = f"{TMDB_URL}/{url}"
     headers = {

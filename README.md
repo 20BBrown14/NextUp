@@ -20,3 +20,11 @@ Jellyfin's API only returns watch history for media currently on the server ther
 > sync your backends users play state without relying on third party services
 
 However it also stores watch history for all media a user has watched regardless of the status on the media on the server. Using WatchState's API NextUp can fetch a complete watch history. WatchState stores actual watch history AND user-marked watched media. As a result users can "Mark as Watched" media in their recommendations to avoid recommending it in the future as well as use it as a seed for further recommendations.
+
+## Installation / Usage
+The easiest way to use NextUp is to use the Docker image but you also build from source or run using Python directly.
+
+### Docker Image
+```yaml
+
+```

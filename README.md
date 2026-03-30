@@ -180,5 +180,6 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 ### [MIT License](LICENSE)
 
 ## Acknowledgments
-Special thanks to the developers and maintainers of [Jellyfin](https://github.com/jellyfin/jellyfin), [Seerr](https://github.com/seerr-team/seerr), [WatchState](https://github.com/arabcoders/watchstate), and [TMDB](https://www.themoviedb.org/)
+Special thanks to the developers and maintainers of [Jellyfin](https://github.com/jellyfin/jellyfin), [Seerr](https://github.com/seerr-team/seerr), [WatchState](https://github.com/arabcoders/watchstate), and [TMDB](https://www.themoviedb.org/).
+
 Thanks to the developers and maintainers of [Jellybridge Jellyfin Plugin](https://github.com/kinggeorges12/JellyBridge) for the inspiration for this project as well as the source of the [placeholder video file](movie.mp4)

@@ -6,6 +6,8 @@ config.env
 .vscode
 compose.yaml
 todo.md
+file_test.mp4
+recommendations
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

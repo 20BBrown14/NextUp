@@ -142,6 +142,7 @@ NextUp uses a configuration file, `config.env` to customize NextUp Behavior.
 | Name             | Default | Description                                | Required    |
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | NEXTUP_RECOMMENDATIONS_DIR | `/recommendations` | Base directory for NextUp to create recommendations in | ❌         |
+| PLACEHOLDER_FILE_PATH | `/movie.mp4` | The path to the video file to use as a placeholder for the recommendations. If using Docker the file must be passed to the container. If not passed the default video file will be used. | ❌         |
 
 ### WatchState
 | Name             | Default | Description                                | Required    |
@@ -176,7 +177,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | MOVIE_LIBRARY_IDS |         | Comma separated list of library IDs to search movie watch history for. Using this option effectively ensures NextUp Recommendations are ignored by NextUp on further runs. | ❌         |
 | MAX_MOVIE_DAYS_LOOKBACK      |         | The number of days lookback at watch history to generate recommendations from. If unset uses entire history. | ❌         |
 | MAX_RECOMMENDATIONS_PER_MOVIE | 5 | The max number of recommendations to add per watched movie | ❌         |
-
+| MIN_MOVIE_WATCH_PERCENT | 90 | The percentage that a movie must be watched to be considered for recommendations. This setting helps for movies that are still "in progress" at the credits | ❌ |
 ### [MIT License](LICENSE)
 
 ## Acknowledgments

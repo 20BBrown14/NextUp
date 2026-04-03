@@ -17,11 +17,15 @@ ROOT_RECOMMENDATIONS_DIR_PATH = None
 
 def create_reco_dir():
     global ROOT_RECOMMENDATIONS_DIR_PATH
+    PLACEHOLDER_MOVIE_FILE_PATH = os.environ.get(CONFIG_KEYS["PLACEHOLDER_FILE_PATH"], './movie.mp4')
+
+    if not filesystem.does_path_exist(PLACEHOLDER_MOVIE_FILE_PATH):
+        raise Exception(f"Placeholder movie file, ${PLACEHOLDER_MOVIE_FILE_PATH}, does not exist.")
 
     # Create NextUp dir in recommendations dir if it does not exist
     filesystem.create_directory(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/NextUp")
     # Add copy of `movie.mp4` to it
-    filesystem.copy_file('./movie.mp4', f"{ROOT_RECOMMENDATIONS_DIR_PATH}/NextUp")
+    filesystem.copy_file(PLACEHOLDER_MOVIE_FILE_PATH, f"{ROOT_RECOMMENDATIONS_DIR_PATH}/NextUp/movie.mp4")
 
 def generateMovieRecommendations(user: UserDto, min_watch_percent: float, max_days_lookback: int, max_recos: int):
     global ROOT_RECOMMENDATIONS_DIR_PATH

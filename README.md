@@ -159,7 +159,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 ### Recommendations
 | Name             | Default | Description                                | Required    |
 | ---------------- | ------- | ------------------------------------------ | ----------- |
-| GENERATE_RECOS_FOR | (All users) | Comma separated list of users to generate recos for | ❌         |
+| GENERATE_RECOS_FOR | (All users) | Comma separated list of users to generate recos for. Not providing this will generate recos for all Jellyfin users | ❌         |
 | RECOMMENDATIONS_CRON_SCHEDULE |         | Cron expression used to schedule when recommendations are generated. If not supplied then no scheduler is started. | ❌         |
 
 #### Series

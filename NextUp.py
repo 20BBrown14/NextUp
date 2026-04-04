@@ -118,7 +118,9 @@ def log_time():
 def NextUp():
     global ROOT_RECOMMENDATIONS_DIR_PATH
     ROOT_RECOMMENDATIONS_DIR_PATH = os.environ.get(CONFIG_KEYS["NEXTUP_RECOMMENDATIONS_DIR"], '/recommendations')
-    GENERATE_RECOS_FOR = [name.lower() for name in os.environ.get(CONFIG_KEYS["GENERATE_RECOS_FOR"]).rsplit(',')]
+    GENERATE_RECOS_FOR = os.environ.get(CONFIG_KEYS["GENERATE_RECOS_FOR"], '')
+    generate_recos_for_list = [name.lower() for name in GENERATE_RECOS_FOR.rsplit(',')]
+    filtered_generated_recos_for_list = [name for name in generate_recos_for_list if name]
     MIN_MOVIE_WATCH_PERCENT = os.environ.get(CONFIG_KEYS["MIN_MOVIE_WATCH_PERCENT"])
     MAX_MOVIE_DAYS_LOOKBACK = os.environ.get(CONFIG_KEYS['MAX_MOVIE_DAYS_LOOKBACK'])
     MAX_RECOMMENDATIONS_PER_MOVIE = os.environ.get(CONFIG_KEYS['MAX_RECOMMENDATIONS_PER_MOVIE'], 5)
@@ -131,7 +133,7 @@ def NextUp():
     DISABLE_SERIES_RECOMMENDATIONS = True if os.environ.get(CONFIG_KEYS['DISABLE_SERIES_RECOMMENDATIONS']).lower() == 'true' else False
 
     all_jellyfin_users = jellyfin_api_service.get_users()
-    users_to_recommend_for = [user for user in all_jellyfin_users if user["Name"].lower() in GENERATE_RECOS_FOR]
+    users_to_recommend_for = [user for user in all_jellyfin_users if user["Name"].lower() in filtered_generated_recos_for_list or len(filtered_generated_recos_for_list) == 0]
 
     if not users_to_recommend_for or not len(users_to_recommend_for):
         raise Exception('No users defined. Stopping.')

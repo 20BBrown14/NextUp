@@ -6,6 +6,7 @@ from utils.helpers import parse_jellyfin_date
 from schemas.watchstate.watchstate import WatchStateHistory
 from typing import Optional, Dict, Any, List, cast, NamedTuple
 from datetime import date, timedelta
+from collections import Counter
 
 class Series(NamedTuple):
         name: str
@@ -145,7 +146,7 @@ def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = No
     return movies
 
 # returns a list of Series
-def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = None) -> List[Series]:
+def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = None, min_episode_watch_count: int = None) -> List[Series]:
     WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP = os.environ.get(WATCHSTATE_SECRET_KEYS["WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP"])
     headers = {
         'X-User': jellyfin_user_name if jellyfin_user_name != WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP else 'main'
@@ -184,7 +185,11 @@ def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = No
             series_id = jellyfin_metadata.get('show')
             series_tmdb = jellyfin_metadata.get('parent').get('guid_tmdb')
             new_series = Series(series_title, series_id, series_tmdb)
-            if new_series not in last_x_day_series_list:
-                last_x_day_series_list.append(new_series)
+            last_x_day_series_list.append(new_series)
 
-    return last_x_day_series_list
+    filtered_user_series_id_list = [series for series in last_x_day_series_list if series is not None]
+    counts = Counter(series for series in filtered_user_series_id_list)
+
+    deduplicated_user_series_list = [series for series, count in counts.items() if count >= min_episode_watch_count]
+
+    return deduplicated_user_series_list

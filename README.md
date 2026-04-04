@@ -169,6 +169,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | SERIES_LIBRARY_IDS |         | Comma separated list of library IDs to search series watch history for. Using this option effectively ensures NextUp Recommendations are ignored by NextUp on further runs. | ❌         |
 | MAX_SERIES_DAYS_LOOKBACK      |         | The number of days lookback at watch history to generate recommendations from. If unset uses entire history. | ❌         |
 | MAX_RECOMMENDATIONS_PER_SERIES | 10 | The max number of recommendations to add per watched series | ❌         |
+| MIN_EPISODE_WATCH_COUNT | 2 | The min number of episodes of a series that need to be watched to consider it for recommendations | ❌ |
 
 #### Movie
 | Name             | Default | Description                                | Required    |

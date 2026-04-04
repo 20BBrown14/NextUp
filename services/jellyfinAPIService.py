@@ -7,6 +7,7 @@ from schemas.jellyfin.models import UserDto, BaseItemDto
 from typing import Optional, Dict, Any, List, cast, NamedTuple
 from datetime import date, timedelta
 from constants.config import CONFIG_KEYS
+from collections import Counter
 
 class Series(NamedTuple):
         name: str
@@ -59,12 +60,13 @@ def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[BaseItemDto]:
 
     return tmdb_list
 
-def get_user_watched_series_ids(user_id: str, max_days: int = None) -> List[Series]:    
+def get_user_watched_series_ids(user_id: str, max_days: int = None, min_episode_watch_count: int = None) -> List[Series]:    
     params = {
         "Filters": "IsPlayed",
         "Recursive": True,
         "IncludeItemTypes": "Episode"
     }
+
     raw_user_played_episode_list = _make_authenticated_jellyfin_api_request(f"Users/{user_id}/Items", params=params).json().get("Items", [])
     user_played_episode_list = cast(List[BaseItemDto], raw_user_played_episode_list)
 
@@ -85,8 +87,11 @@ def get_user_watched_series_ids(user_id: str, max_days: int = None) -> List[Seri
             last_x_days_episode_list.append(episode)
 
 
-    user_series_id_list = [(episode.get("SeriesName"), episode.get("SeriesId")) for episode in last_x_days_episode_list]
-    deduplicated_user_series_list = list(set([id for id in user_series_id_list if id is not None]))
+    user_series_list = [(episode.get("SeriesName"), episode.get("SeriesId")) for episode in last_x_days_episode_list]
+    filtered_user_series_id_list = [series for series in user_series_list if series is not None]
+    counts = Counter(series for series in filtered_user_series_id_list)
+
+    deduplicated_user_series_list = [series for series, count in counts.items() if count >= min_episode_watch_count]
 
     series_ids: list[str] = [series[1] for series in deduplicated_user_series_list]
     tmdb_id_list = get_series_provider_ids_by_ids(series_ids)

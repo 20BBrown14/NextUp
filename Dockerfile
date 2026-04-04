@@ -38,4 +38,4 @@ ENV APP_PORT=5777
 EXPOSE $APP_PORT
 
 # Run the application.
-CMD fastapi run server.py --host ${APP_HOST} --port ${APP_PORT}
+CMD ["sh", "-c", "RELOAD=\"\"; [ \"$ENV\" = \"dev\" ] && RELOAD=\"--reload\"; fastapi run server.py --host ${APP_HOST} --port ${APP_PORT} $RELOAD"]

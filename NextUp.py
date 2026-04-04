@@ -70,18 +70,17 @@ def generateMovieRecommendations(user: UserDto, min_watch_percent: float, max_da
 
     return
 
-def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_recos: int):
+def generateSeriesRecommendations(user: UserDto, max_days_lookback: int, max_recos: int, min_episode_watch_count: int):
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
     all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")))
     
     watched_series = None
     if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
-        watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback)
+        watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback, min_episode_watch_count)
     else:
-        watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback)
+        watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_episode_watch_count)
 
-    # all_user_series_ids might not include all series user has actually watched for the purpose of removing recommendations user has already watched
     all_user_series_ids.extend([series.tmdb_id for series in watched_series])
     all_user_series_ids = list(set(all_user_series_ids))
 
@@ -126,6 +125,7 @@ def NextUp():
 
     MAX_SERIES_DAYS_LOOKBACK = os.environ.get(CONFIG_KEYS['MAX_SERIES_DAYS_LOOKBACK'])
     MAX_RECOMMENDATIONS_PER_SERIES = os.environ.get(CONFIG_KEYS['MAX_RECOMMENDATIONS_PER_SERIES'], 10)
+    MIN_EPISODE_WATCH_COUNT = os.environ.get(CONFIG_KEYS['MIN_EPISODE_WATCH_COUNT'], 2)
     
     DISABLE_MOVIE_RECOMMENDATIONS = True if os.environ.get(CONFIG_KEYS['DISABLE_MOVIE_RECOMMENDATIONS']).lower() == 'true' else False
     DISABLE_SERIES_RECOMMENDATIONS = True if os.environ.get(CONFIG_KEYS['DISABLE_SERIES_RECOMMENDATIONS']).lower() == 'true' else False
@@ -145,7 +145,7 @@ def NextUp():
             logger.info("Movie recommendations are disabled. Skipping.")
         
         if not DISABLE_SERIES_RECOMMENDATIONS:
-            generateSeriesRecommendations(user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES))
+            generateSeriesRecommendations(user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES), int(MIN_EPISODE_WATCH_COUNT))
         else:
             logger.info("Series recommendations are disabled. Skipping.")
 

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from constants.jellyfin import WEBHOOK_NOTIFICATION_TYPES, SUPPORTED_WEBHOOK_NOTIFICATION_TYPES
+from constants.seerr import SEERR_SECRET_KEYS
 from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service
 from utils import load_env
 from NextUp import start_main_loop, NextUp

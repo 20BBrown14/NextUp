@@ -28,4 +28,6 @@ def parse_jellyfin_date(date_str: str):
     clean_str = f"{date_str.split('T')[0]}"
     return clean_str
 
+def create_map_by_id(items, id_key):
+    return {item[id_key]: item for item in items}
 

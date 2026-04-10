@@ -5,13 +5,19 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 
 ## Features
 - Support for any number of users
+- Can create popular movies, popular series, and upcoming movie recommendations
+- CRON expression supported for flexible scheduling
 - Optional WatchState integration for long lived watch history
 - Optional Seerr integration to generate requests from Jellyfin UI
 
 ## How It Works
-NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. 
+NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. Optionally, NextUp can create popular movies, upcoming movies, and popular series recommendations.
 
 If the Seerr integration is enabled in NextUp users can favorite media from their recommendations to automatically request it for download in Seerr. Note that due to the way Seerr's api is implemented [all requests are auto-approved](https://github.com/seerr-team/seerr/issues/2678#issuecomment-4038790777).
+
+NextUp never adds any recommendations if the user already has access to the media on the server. Additionally, NextUp does _not_ guarantee or try in anyway to generate recommendations that adhere to any of the user's content restrictions as defined in their Jellyfin user profile (ex. age-rating).
+
+**The Placeholder video is created once in a `NextUp` directory of your recommendations path and is then hardlinked to recommendations directories to avoid duplicating data.**
 
 ### Watch History Limitation
 Jellyfin's API only returns watch history for media currently on the server therefore users with a small changing library would not get the benefit of a long standing watch history to pull recommendations from.
@@ -89,7 +95,7 @@ services:
 
 Now run `docker compose up --build -d`
 
-### Jellyfin Setup
+### Jellyfin Webhook Setup
 To allow NextUp to be notified when a user favorites a recommendation and create a recommendation in Seerr you must setup a webhook to send notifications to NextUp.
 
 1. In Jellyfin go to Dashboard -> Plugins
@@ -170,6 +176,13 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | MAX_SERIES_DAYS_LOOKBACK      |         | The number of days lookback at watch history to generate recommendations from. If unset uses entire history. | ❌         |
 | MAX_RECOMMENDATIONS_PER_SERIES | 10 | The max number of recommendations to add per watched series | ❌         |
 | MIN_EPISODE_WATCH_COUNT | 2 | The min number of episodes of a series that need to be watched to consider it for recommendations | ❌ |
+| MAX_TOTAL_SERIES_RECOMMENDATIONS|  | The max number of TOTAL series recommendations to generate per user.* | ❌ |
+| INCLUDE_POPULAR_SERIES_RECOMMENDATIONS | true | Whether to generate recommendations in Jellyfin for TMDB's _popular_ series.** | ❌ |
+| POPULAR_SERIES_COUNT | 100 | The number of popular series recommendations to generate. | ❌ |
+
+*If `MAX_TOTAL_SERIES_RECOMMENDATIONS` is set recommendations will be weighted 90% towards a user's most watched genres and 10% towards the least watch. If not set then there will be a max of `MAX_RECOMMENDATIONS_PER_SERIES` recommendations per each series the user has watched and no weighting is used.
+
+**Popular recommendations are generated directlty from [TMDB's api endpoint](https://developer.themoviedb.org/reference/tv-series-popular-list). They are added to a `popular-series` directory which can be added to Jellyfin as a library and displayed for users.
 
 #### Movie
 | Name             | Default | Description                                | Required    |
@@ -179,6 +192,16 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | MAX_MOVIE_DAYS_LOOKBACK      |         | The number of days lookback at watch history to generate recommendations from. If unset uses entire history. | ❌         |
 | MAX_RECOMMENDATIONS_PER_MOVIE | 5 | The max number of recommendations to add per watched movie | ❌         |
 | MIN_MOVIE_WATCH_PERCENT | 90 | The percentage that a movie must be watched to be considered for recommendations. This setting helps for movies that are still "in progress" at the credits | ❌ |
+| MAX_TOTAL_MOVIE_RECOMMENDATIONS|  | The max number of TOTAL movie recommendations to generate per user.* | ❌ |
+| INCLUDE_POPULAR_MOVIE_RECOMMENDATIONS | true | Whether to generate recommendations in Jellyfin for TMDB's _popular_ movies.** | ❌ |
+| INCLUDE_UPCOMING_MOVIE_RECOMMENDATIONS | true | Whether to generate recommendations in Jellyfin for TMDB's _upcoming_ movies.** | ❌ |
+| POPULAR_MOVIES_COUNT | 50 | The number of popular movie recommendations to generate. | ❌ |
+| UPCOMING_MOVIES_COUNT | 50 | The number of upcoming movie recommendations to generate. | ❌ |
+
+*If `MAX_TOTAL_MOVIE_RECOMMENDATIONS` is set recommendations will be weighted 90% towards a user's most watched genres and 10% towards the least watch. If not set then there will be a max of `MAX_RECOMMENDATIONS_PER_MOVIE` recommendations per each movie the user has watched and no weighting is used.
+
+**Popular and upcoming recommendations are generated directlty from TMDB's [popular](https://developer.themoviedb.org/reference/movie-popular-list) and [upcoming](https://developer.themoviedb.org/reference/movie-upcoming-list) api endpoints. They are added to `popular-movie` and `upcoming-movie` directories which can be added to Jellyfin as a libraries and displayed for users.
+
 ### [MIT License](LICENSE)
 
 ## Acknowledgments

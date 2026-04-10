@@ -34,3 +34,19 @@ class TMDBSeriesRecommendation(TypedDict, closed=True):
     vote_average: float
     vote_count: int
     origin_country: List[str]
+
+class TMDBPopularMoviesResponse(TypedDict, closed=True):
+    page: int
+    results: List[TMDBMovieRecommendation]
+    total_pages: int
+    total_result: int
+
+class TMDBPopularSeriesResponse(TypedDict, closed=True):
+    page: int
+    results: List[TMDBSeriesRecommendation]
+    total_pages: int
+    total_result: int
+
+class Genre(TypedDict, closed=True):
+    id: int
+    name: str

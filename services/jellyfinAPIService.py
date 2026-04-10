@@ -12,12 +12,15 @@ from collections import Counter
 class Series(NamedTuple):
         name: str
         id: str
-        tmdb_id: str
+        genres: List[str]
+        tmdb_id: str # This should be last
+
 
 class Movie(NamedTuple):
         name: str
         id: str
-        tmdb_id: str
+        genres: List[str]
+        tmdb_id: str # This should be last
 
 def _make_authenticated_jellyfin_api_request(
     url: str,
@@ -47,7 +50,7 @@ def get_configured_users() -> List[UserDto]:
     return [user for user in all_users if user['Name'].lower() in configured_users]
 
 # Guaranteed to return in the same order, None for missing values
-def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[BaseItemDto]:
+def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[List[str]]:
     params = {
         "Fields": "ProviderIds",
         "ids": ','.join(series_ids)
@@ -60,11 +63,51 @@ def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[BaseItemDto]:
 
     return tmdb_list
 
+# Guaranteed to return in the same order, None for missing values
+def get_movies_provider_ids_by_ids(movie_ids: List[str]) -> List[List[str]]:
+    params = {
+        "Fields": "ProviderIds",
+        "ids": ','.join(movie_ids)
+    }
+
+    raw_movies_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
+    movies_list = cast(List[BaseItemDto], raw_movies_list)
+
+    tmdb_list = [movie.get("ProviderIds", {}).get("Tmdb", None) for movie in movies_list if movie.get("ProviderIds", {}).get("Tmdb")]
+
+    return tmdb_list
+
+def get_series_genres_by_ids(series_ids: List[str]) -> List[List[str]]:
+    params = {
+        "Fields": "Genres",
+        "ids": ','.join(series_ids)
+    }
+
+    raw_series_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
+    series_list = cast(List[BaseItemDto], raw_series_list)
+
+    genre_list = [series.get("Genres", []) for series in series_list]
+
+    return genre_list
+
+def get_movie_genres_by_ids(movie_ids: List[str]) -> List[List[str]]:
+    params = {
+        "Fields": "Genres",
+        "ids": ','.join(movie_ids)
+    }
+
+    raw_movies_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
+    movies_list = cast(List[BaseItemDto], raw_movies_list)
+
+    genre_list = [movies.get("Genres", []) for movies in movies_list]
+
+    return genre_list
+
 def get_user_watched_series_ids(user_id: str, max_days: int = None, min_episode_watch_count: int = None) -> List[Series]:    
     params = {
         "Filters": "IsPlayed",
         "Recursive": True,
-        "IncludeItemTypes": "Episode"
+        "IncludeItemTypes": "Episode",
     }
 
     raw_user_played_episode_list = _make_authenticated_jellyfin_api_request(f"Users/{user_id}/Items", params=params).json().get("Items", [])
@@ -92,11 +135,10 @@ def get_user_watched_series_ids(user_id: str, max_days: int = None, min_episode_
     counts = Counter(series for series in filtered_user_series_id_list)
 
     deduplicated_user_series_list = [series for series, count in counts.items() if count >= min_episode_watch_count]
-
     series_ids: list[str] = [series[1] for series in deduplicated_user_series_list]
     tmdb_id_list = get_series_provider_ids_by_ids(series_ids)
-
-    return [Series(*series, tmdb_id_list[index]) for index, series in enumerate(deduplicated_user_series_list) if tmdb_id_list[index] is not None]
+    genre_list = get_series_genres_by_ids(series_ids)
+    return [Series(*series, genre_list[index] or [], tmdb_id_list[index]) for index, series in enumerate(deduplicated_user_series_list) if tmdb_id_list[index] is not None]
 
 
 def get_user_fully_watched_movies(user_id: str) -> List[BaseItemDto]:
@@ -161,10 +203,14 @@ def get_all_user_movies(user_id: str, max_days: int = None, min_progress_percent
             last_x_day_movie_list.append(movie)
 
 
-    user_movie_id_list = [(movie.get("Name"), movie.get("Id"), movie.get("ProviderIds", {}).get("Tmdb")) for movie in last_x_day_movie_list]
-    deduplicated_user_movie_list = list(set([id for id in user_movie_id_list if id is not None]))
-
-    return [Movie(*movie) for movie in deduplicated_user_movie_list]
+    user_movie_list = [(movie.get("Name"), movie.get("Id")) for movie in last_x_day_movie_list]
+    
+    filtered_user_movie_list = [movie for movie in user_movie_list if movie is not None]
+    
+    movie_ids: list[str] = [movie[1] for movie in filtered_user_movie_list]
+    tmdb_id_list = get_movies_provider_ids_by_ids(movie_ids)
+    genre_list = get_movie_genres_by_ids(movie_ids)
+    return [Movie(*movie, genre_list[index] or [], tmdb_id_list[index]) for index, movie in enumerate(filtered_user_movie_list) if tmdb_id_list[index] is not None]
 
 def get_all_available_movies(user_id: str = None) -> List[str]:
     RAW_MOVIE_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["MOVIE_LIBRARY_IDS"])

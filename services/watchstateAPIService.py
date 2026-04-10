@@ -99,7 +99,7 @@ def auth_user() -> requests.Response:
     return
 
 # Returns a list of Movies
-def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = None) -> List[int]:
+def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = None) -> List[Movie]:
     WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP = os.environ.get(WATCHSTATE_SECRET_KEYS["WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP"])
     headers = {
         'X-User': jellyfin_user_name if jellyfin_user_name != WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP else 'main'

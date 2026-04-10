@@ -11,11 +11,13 @@ from collections import Counter
 class Series(NamedTuple):
         name: str
         id: str
+        genres: List[str]
         tmdb_id: str
 
 class Movie(NamedTuple):
         name: str
         id: str
+        genres: List[str]
         tmdb_id: str
 
 user_token = None
@@ -141,7 +143,9 @@ def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = No
         title = movie.get('title')
         jellyfin_id = jellyfin_metadata.get('id')
         tmdb_id = movie.get('guids').get('guid_tmdb')
-        movies.append(Movie(title, jellyfin_id, tmdb_id))
+        raw_genres = jellyfin_metadata.get('extra', {}).get('genres', [])
+        genres = [genre.lower() for genre in raw_genres]
+        movies.append(Movie(title, jellyfin_id, genres, tmdb_id))
 
     return movies
 
@@ -184,12 +188,19 @@ def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = No
             series_title = jellyfin_metadata.get('title')
             series_id = jellyfin_metadata.get('show')
             series_tmdb = jellyfin_metadata.get('parent').get('guid_tmdb')
-            new_series = Series(series_title, series_id, series_tmdb)
+            raw_series_genres = jellyfin_metadata.get('extra', {}).get('genres', [])
+            series_genres = [genre.lower() for genre in raw_series_genres]
+            new_series = Series(series_title, series_id, series_genres, series_tmdb)
             last_x_day_series_list.append(new_series)
 
     filtered_user_series_id_list = [series for series in last_x_day_series_list if series is not None]
-    counts = Counter(series for series in filtered_user_series_id_list)
+    counts = Counter(series.id for series in filtered_user_series_id_list)
 
-    deduplicated_user_series_list = [series for series, count in counts.items() if count >= min_episode_watch_count]
+    id_to_series = {series.id: series for series in filtered_user_series_id_list}
+    deduplicated_user_series_list = [
+        id_to_series[s_id] 
+        for s_id, count in counts.items() 
+        if count >= min_episode_watch_count
+    ]
 
     return deduplicated_user_series_list

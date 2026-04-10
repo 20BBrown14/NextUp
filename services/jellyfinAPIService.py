@@ -86,7 +86,8 @@ def get_series_genres_by_ids(series_ids: List[str]) -> List[List[str]]:
     raw_series_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
     series_list = cast(List[BaseItemDto], raw_series_list)
 
-    genre_list = [series.get("Genres", []) for series in series_list]
+    raw_genre_list = [series.get("Genres", []) for series in series_list]
+    genre_list = [genre.lower() for genre in raw_genre_list]
 
     return genre_list
 
@@ -99,7 +100,8 @@ def get_movie_genres_by_ids(movie_ids: List[str]) -> List[List[str]]:
     raw_movies_list = _make_authenticated_jellyfin_api_request(f"Items", params=params).json().get("Items", [])
     movies_list = cast(List[BaseItemDto], raw_movies_list)
 
-    genre_list = [movies.get("Genres", []) for movies in movies_list]
+    raw_genre_list = [movies.get("Genres", []) for movies in movies_list]
+    genre_list = [genre.lower() for genre in raw_genre_list]
 
     return genre_list
 

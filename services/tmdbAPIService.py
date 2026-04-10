@@ -28,10 +28,12 @@ def _make_authenticated_tmdb_api_request(
     return make_request(request_url, method, params, body, headers, timeout)
 
 def get_tv_genres() -> List[Genre]:
-    return _make_authenticated_tmdb_api_request('genre/tv/list').json().get('genres')
+    genres = _make_authenticated_tmdb_api_request('genre/tv/list').json().get('genres')
+    return [{'id': genre.get('id'), 'name': genre.get('name').lower()} for genre in genres]
 
 def get_movie_genres():
-    return _make_authenticated_tmdb_api_request('genre/movie/list').json().get('genres')
+    genres = _make_authenticated_tmdb_api_request('genre/movie/list').json().get('genres')
+    return [{'id': genre.get('id'), 'name': genre.get('name').lower()} for genre in genres]
 
 def get_recommendations_by_id(type: Literal['movie', 'tv'], id: str, pages: int = 3, sort_by: str = 'vote_average', sort_dir: str = 'desc', min_vote_count=10) -> List[TMDBMovieRecommendation | TMDBSeriesRecommendation]:
     if not type or not type in ['movie', 'tv']:

@@ -166,7 +166,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | Name             | Default | Description                                | Required    |
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | GENERATE_RECOS_FOR | (All users) | Comma separated list of users to generate recos for. Not providing this will generate recos for all Jellyfin users | ❌         |
-| RECOMMENDATIONS_CRON_SCHEDULE |         | Cron expression used to schedule when recommendations are generated. If not supplied then no scheduler is started. | ❌         |
+| RECOMMENDATIONS_CRON_SCHEDULE |         | Cron expression used to schedule when recommendations are generated. If not supplied then no scheduler is started. Without a scheduler you can still manually invoke recommendation generation by using the [API](#API) | ❌         |
 
 #### Series
 | Name             | Default | Description                                | Required    |
@@ -201,6 +201,16 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 *If `MAX_TOTAL_MOVIE_RECOMMENDATIONS` is set recommendations will be weighted 90% towards a user's most watched genres and 10% towards the least watch. If not set then there will be a max of `MAX_RECOMMENDATIONS_PER_MOVIE` recommendations per each movie the user has watched and no weighting is used.
 
 **Popular and upcoming recommendations are generated directlty from TMDB's [popular](https://developer.themoviedb.org/reference/movie-popular-list) and [upcoming](https://developer.themoviedb.org/reference/movie-upcoming-list) api endpoints. They are added to `popular-movie` and `upcoming-movie` directories which can be added to Jellyfin as a libraries and displayed for users.
+
+### API
+
+The API is not secured with any authorization. It's highly recommended to NOT expose this server to the internet or any networks/devices you do not implicitly trust.
+
+#### `GET /health-check`
+Responds with a simple 200 and `"{'message': 'Healthy!'}"` message if the server is running.
+
+#### `POST /recommendations/run`
+Runs the recommendation engine. This is the same as the scheduler does if enabled.
 
 ### [MIT License](LICENSE)
 

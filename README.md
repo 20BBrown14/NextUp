@@ -1,5 +1,5 @@
 # NextUp
-NextUp is a program that allows [Jellyfin](https://jellyfin.org/) admins to generate user personalized movie and series recommendations directly in Jellyfin regardless of client using Jellyfin libraries. User are also able to generate media requests in [Seer](https://seerr.dev/) right from the Jellyfin UI by favoriting the media in their recommendations.
+NextUp is a program that allows [Jellyfin](https://jellyfin.org/) admins to generate user personalized movie and series recommendations directly in Jellyfin regardless of client using Jellyfin libraries. User are also able to generate media requests in [Seer](https://seerr.dev/) right from the Jellyfin UI by "favoriting" the media in their recommendations.
 
 NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchstate) to allow for more long live watch history to improve recommendations and avoid getting recommendations for media the user has already watched but might have been removed from the server.
 
@@ -13,16 +13,16 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 ## How It Works
 NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. Optionally, NextUp can create popular movies, upcoming movies, and popular series recommendations.
 
-If the Seerr integration is enabled in NextUp users can favorite media from their recommendations to automatically request it for download in Seerr. Note that due to the way Seerr's api is implemented [all requests are auto-approved](https://github.com/seerr-team/seerr/issues/2678#issuecomment-4038790777).
+If the Seerr integration is enabled in NextUp users can favorite media from their recommendations to automatically request it for download in Seerr. Note that due to the way Seerr's api is implemented [all requests are auto-approved](https://github.com/seerr-team/seerr/issues/2678#issuecomment-4038790777). Also note that requested series **only request the first season** to avoid downloading a lot of data for shows with many seasons especially if the user decides they're not interested and don't want to watch it anymore.
 
 NextUp never adds any recommendations if the user already has access to the media on the server. Additionally, NextUp does _not_ guarantee or try in anyway to generate recommendations that adhere to any of the user's content restrictions as defined in their Jellyfin user profile (ex. age-rating).
 
-**The Placeholder video is created once in a `NextUp` directory of your recommendations path and is then hardlinked to recommendations directories to avoid duplicating data.**
+**The Placeholder video is created once in a `NextUp` directory of your recommendations path and is then hard-linked to recommendations directories to avoid duplicating data.**
 
 ### Watch History Limitation
 Jellyfin's API only returns watch history for media currently on the server therefore users with a small changing library would not get the benefit of a long standing watch history to pull recommendations from.
 
-[WatchState](https://github.com/arabcoders/watchstate) is a self-hostable tool that was originally designed to 
+[WatchState](https://github.com/arabcoders/watchstate) is a self-hosted tool that was originally designed to 
 > sync your backends users play state without relying on third party services
 
 However it also stores watch history for all media a user has watched regardless of the status on the media on the server. Using WatchState's API NextUp can fetch a complete watch history. WatchState stores actual watch history AND user-marked watched media. As a result users can "Mark as Watched" media in their recommendations to avoid recommending it in the future as well as use it as a seed for further recommendations.
@@ -95,7 +95,16 @@ services:
 
 Now run `docker compose up --build -d`
 
-### Jellyfin Webhook Setup
+### Jellyfin Setup
+
+#### Libraries
+After NextUp has ran for the first time you should see some new directories in your `/recommendations` directory depending on your settings. The directories with usernames are that user's personalized recommendations and `popular-series`, `popular-movies`, and `upcoming-movies` are just as they seem.
+
+You should add new libraries in Jellyfin that utilize these directories. Personally I name them `Discover - Shows (username)` (or movies) and then give only that user access to see that library.
+
+Users can then browse the libraries and "mark as watched" media they already watched or "favorite" media to automatically request it in Seerr if that integration is enabled.
+
+#### Webhooks
 To allow NextUp to be notified when a user favorites a recommendation and create a recommendation in Seerr you must setup a webhook to send notifications to NextUp.
 
 1. In Jellyfin go to Dashboard -> Plugins
@@ -117,7 +126,7 @@ To allow NextUp to be notified when a user favorites a recommendation and create
 12. **DO NOT FORGET TO SAVE**
 
 ### WatchState Setup
-To enable watchstate in your install you must provide the [WatchState configuration](#watchstate). Follow the [WatchState installation instructions](https://github.com/arabcoders/watchstate?tab=readme-ov-file#install) to setup your Jellyfin backend and users/sub-users. Don't forget to setup the Webhook for your backend.
+To enable WatchState in your install you must provide the [WatchState configuration](#watchstate). Follow the [WatchState installation instructions](https://github.com/arabcoders/watchstate?tab=readme-ov-file#install) to setup your Jellyfin backend and users/sub-users. Don't forget to setup the Webhook for your backend.
 
 ## Configuration
 NextUp uses a configuration file, `config.env` to customize NextUp Behavior. 
@@ -182,14 +191,14 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 
 *If `MAX_TOTAL_SERIES_RECOMMENDATIONS` is set recommendations will be weighted 90% towards a user's most watched genres and 10% towards the least watch. If not set then there will be a max of `MAX_RECOMMENDATIONS_PER_SERIES` recommendations per each series the user has watched and no weighting is used.
 
-**Popular recommendations are generated directlty from [TMDB's api endpoint](https://developer.themoviedb.org/reference/tv-series-popular-list). They are added to a `popular-series` directory which can be added to Jellyfin as a library and displayed for users.
+**Popular recommendations are generated directly from [TMDB's api endpoint](https://developer.themoviedb.org/reference/tv-series-popular-list). They are added to a `popular-series` directory which can be added to Jellyfin as a library and displayed for users.
 
 #### Movie
 | Name             | Default | Description                                | Required    |
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | DISABLE_MOVIE_RECOMMENDATIONS | false | Whether to disable generating recommendations from/for movies. | ❌         |
 | MOVIE_LIBRARY_IDS |         | Comma separated list of library IDs to search movie watch history for. Using this option effectively ensures NextUp Recommendations are ignored by NextUp on further runs. | ❌         |
-| MAX_MOVIE_DAYS_LOOKBACK      |         | The number of days lookback at watch history to generate recommendations from. If unset uses entire history. | ❌         |
+| MAX_MOVIE_DAYS_LOOKBACK      |         | The number of days to look back at watch history to generate recommendations from. If unset uses entire history. | ❌         |
 | MAX_RECOMMENDATIONS_PER_MOVIE | 5 | The max number of recommendations to add per watched movie | ❌         |
 | MIN_MOVIE_WATCH_PERCENT | 90 | The percentage that a movie must be watched to be considered for recommendations. This setting helps for movies that are still "in progress" at the credits | ❌ |
 | MAX_TOTAL_MOVIE_RECOMMENDATIONS|  | The max number of TOTAL movie recommendations to generate per user.* | ❌ |
@@ -200,7 +209,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 
 *If `MAX_TOTAL_MOVIE_RECOMMENDATIONS` is set recommendations will be weighted 90% towards a user's most watched genres and 10% towards the least watch. If not set then there will be a max of `MAX_RECOMMENDATIONS_PER_MOVIE` recommendations per each movie the user has watched and no weighting is used.
 
-**Popular and upcoming recommendations are generated directlty from TMDB's [popular](https://developer.themoviedb.org/reference/movie-popular-list) and [upcoming](https://developer.themoviedb.org/reference/movie-upcoming-list) api endpoints. They are added to `popular-movie` and `upcoming-movie` directories which can be added to Jellyfin as a libraries and displayed for users.
+**Popular and upcoming recommendations are generated directly from TMDB's [popular](https://developer.themoviedb.org/reference/movie-popular-list) and [upcoming](https://developer.themoviedb.org/reference/movie-upcoming-list) api endpoints. They are added to `popular-movie` and `upcoming-movie` directories which can be added to Jellyfin as a libraries and displayed for users.
 
 ### API
 
@@ -211,6 +220,9 @@ Responds with a simple 200 and `"{'message': 'Healthy!'}"` message if the server
 
 #### `POST /recommendations/run`
 Runs the recommendation engine. This is the same as the scheduler does if enabled.
+
+### Support
+If you experience issues, found a bug, or have other comments and concerns you can open an [issue](https://github.com/20BBrown14/NextUp/issues) or start a [discussion](https://github.com/20BBrown14/NextUp/discussions).
 
 ### [MIT License](LICENSE)
 

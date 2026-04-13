@@ -3,6 +3,34 @@ NextUp is a program that allows [Jellyfin](https://jellyfin.org/) admins to gene
 
 NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchstate) to allow for more long live watch history to improve recommendations and avoid getting recommendations for media the user has already watched but might have been removed from the server.
 
+# Table of Contents
+- [Features](#features)
+- [How it Works](#how-it-works)
+  - [Watch History Limitation](#watch-history-limitation)
+- [Installation / Usage](#installation--usage)
+  - [Docker](#docker)
+    - [Compose](#compose)
+    - [Run](#run)
+    - [Build From Source](#build-from-source)
+  - [Jellyfin Setup](#jellyfin-setup)
+    - [Libraries](#libraries)
+    - [Webhooks](#webhooks)
+  - [WatchState Setup](#watchstate-setup)
+- [Configuration](#configuration)
+  - [Jellyfin](#jellyfin)
+  - [Seerr](#seerr)
+  - [TMDB](#tmdb)
+  - [NextUp](#nextup-1)
+  - [WatchState](#watchstate)
+  - [Recommendations](#recommendations)
+  - [Series](#series)
+  - [Movie](#movie)
+- [API](#api)
+- [Support](#support)
+- [License](#mit-license)
+- [Acknowledgments](#acknowledgments)
+- [AI Disclaimer](#ai-disclaimer)
+
 ## Features
 - Support for any number of users
 - Can create popular movies, popular series, and upcoming movie recommendations
@@ -10,7 +38,7 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 - Optional WatchState integration for long lived watch history
 - Optional Seerr integration to generate requests from Jellyfin UI
 
-## How It Works
+## How it Works
 NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. Optionally, NextUp can create popular movies, upcoming movies, and popular series recommendations.
 
 If the Seerr integration is enabled in NextUp users can favorite media from their recommendations to automatically request it for download in Seerr. Note that due to the way Seerr's api is implemented [all requests are auto-approved](https://github.com/seerr-team/seerr/issues/2678#issuecomment-4038790777). Also note that requested series **only request the first season** to avoid downloading a lot of data for shows with many seasons especially if the user decides they're not interested and don't want to watch it anymore.
@@ -69,7 +97,7 @@ docker run -d \
   ghcr.io/20bbrown14/nextup:latest
 ```
 
-#### Build from source
+#### Build From Source
 First clone the repository
 `git clone https://github.com/20BBrown14/NextUp`
 
@@ -112,14 +140,14 @@ To allow NextUp to be notified when a user favorites a recommendation and create
 3. After restart go to Dashboard -> Plugins -> Webhook -> Settings
 4. Click "Add Generic Destination"
 5. Provide a name that you will know what it means
-6. Webhook URL
+6. Webhook URL (Use NextUp's host/port)
     1. Use `http://{HOST}:{PORT}/webhook/jellyfin`
 7. Status
     1. Ensure `Enabled` is checked
 8. Notification Type
     1. Ensure `User Data Saved` is checked
 9. User Filter
-    1. Check all users that should be able to automatically generate requests in Seerr by favoriting items
+    1. Check all users that should be able to automatically generate requests in Seerr by favoriting items. Users can have recommendations generated without having the ability to request them in Seerr
 10. Item Type
     1. Ensure `Movies` and `Series` is checked
 11. Ensure `Send All Properties (ignores template)` is checked
@@ -211,7 +239,7 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 
 **Popular and upcoming recommendations are generated directly from TMDB's [popular](https://developer.themoviedb.org/reference/movie-popular-list) and [upcoming](https://developer.themoviedb.org/reference/movie-upcoming-list) api endpoints. They are added to `popular-movie` and `upcoming-movie` directories which can be added to Jellyfin as a libraries and displayed for users.
 
-### API
+## API
 
 The API is not secured with any authorization. It's highly recommended to NOT expose this server to the internet or any networks/devices you do not implicitly trust.
 
@@ -224,7 +252,7 @@ Runs the recommendation engine. This is the same as the scheduler does if enable
 ## Support
 If you experience issues, found a bug, or have other comments and concerns you can open an [issue](https://github.com/20BBrown14/NextUp/issues) or start a [discussion](https://github.com/20BBrown14/NextUp/discussions).
 
-## [MIT License](LICENSE)
+### [MIT License](LICENSE)
 
 ## Acknowledgments
 Special thanks to the developers and maintainers of [Jellyfin](https://github.com/jellyfin/jellyfin), [Seerr](https://github.com/seerr-team/seerr), [WatchState](https://github.com/arabcoders/watchstate), and [TMDB](https://www.themoviedb.org/).

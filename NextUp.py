@@ -35,11 +35,13 @@ def get_all_user_watched_series(user: UserDto, max_days_lookback: int, min_episo
     global ROOT_RECOMMENDATIONS_DIR_PATH
         
     watched_series = None
-    if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
-        watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback, min_episode_watch_count)
-    else:
-        watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_episode_watch_count)
-
+    try:
+        if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
+            watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback, min_episode_watch_count)
+        else:
+            watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_episode_watch_count)
+    except:
+        logger.info(f"Found no series watch history for Jelly user {user.get('Name').lower()}")
     return watched_series
 
 def write_recos_to_filesystem(base_path: str, metadata_json: List[JellyfinMetadata], type: str):
@@ -119,11 +121,19 @@ def generate_movie_recommendations(user: UserDto, min_watch_percent: float, max_
     all_user_movie_ids = jellyfin_api_service.get_all_available_movies(helpers.convert_string_to_uuid(user.get("Id")))
 
     watched_movies = None
-    if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
-        watched_movies = watchstate_api_service.get_user_watched_movies(user.get('Name').lower(), max_days_lookback)
-    else:
-        watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
+    try:
+        if os.environ.get(WATCHSTATE_SECRET_KEYS['WATCHSTATE_URL']) is not None:
+            watched_movies = watchstate_api_service.get_user_watched_movies(user.get('Name').lower(), max_days_lookback)
+        else:
+            watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
+    except:
+        logger.info(f"Found no movie watch history for Jellyfin user {user.get('Name').lower()}")
 
+
+    if watched_movies == None:
+        write_recos_to_filesystem(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{user["Name"]}/movies", [], 'movie')
+        return
+    
     all_user_movie_ids.extend([series.tmdb_id for series in watched_movies])
     all_user_movie_ids = list(set(all_user_movie_ids))
 
@@ -154,6 +164,9 @@ def generate_series_recommendations(user: UserDto, max_days_lookback: int, max_r
     all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")))
     
     watched_series = get_all_user_watched_series(user, max_days_lookback, min_episode_watch_count)
+    if watched_series == None:
+        write_recos_to_filesystem(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{user["Name"]}/series", [], 'series')
+        return
 
     all_user_series_ids.extend([series.tmdb_id for series in watched_series])
     all_user_series_ids = list(set(all_user_series_ids))

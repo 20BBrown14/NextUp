@@ -83,7 +83,7 @@ def weight_series_recos_by_watched_genres(watched_series: List[jellyfin_api_serv
     scored_recs = []
     for rec in series_recos:
         rec['genres'] = []
-        for genre_id in rec['genre_ids']:
+        for genre_id in rec['genre_ids'] and genre_id in series_genre_by_id_map:
             rec['genres'].append(series_genre_by_id_map[genre_id].get('name'))
 
         score = sum(genre_counts.get(genre, 0) for genre in rec['genres'])
@@ -104,7 +104,7 @@ def weight_movie_recos_by_watched_genres(watched_movies: List[jellyfin_api_servi
     scored_recs = []
     for rec in movie_recos:
         rec['genres'] = []
-        for genre_id in rec['genre_ids']:
+        for genre_id in rec['genre_ids'] and genre_id in movie_genre_by_id_map:
             rec['genres'].append(movie_genre_by_id_map[genre_id].get('name'))
 
         score = sum(genre_counts.get(genre, 0) for genre in rec['genres'])

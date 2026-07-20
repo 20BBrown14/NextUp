@@ -1,4 +1,9 @@
 import uuid
+from typing import Callable, Any
+from utils import logger
+
+
+logger = logger.get_logger(__name__)
 
 def is_valid_uuid(uuid_to_test: str, version: int = 4) -> bool:
     try:
@@ -30,4 +35,16 @@ def parse_jellyfin_date(date_str: str):
 
 def create_map_by_id(items, id_key):
     return {item[id_key]: item for item in items}
+
+def safe_call(func: Callable, *args: Any, **kwargs: Any) -> Any:
+    """
+    Executes a function safely. If it fails, logs the debug/exception 
+    information and returns None without crashing the thread.
+    """
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        # logger.exception automatically captures the full stack trace
+        logger.exception(f"Safe call failed for function '{func.__name__}' with args {args} and kwargs {kwargs}")
+        return None
 

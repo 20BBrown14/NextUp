@@ -83,8 +83,9 @@ def weight_series_recos_by_watched_genres(watched_series: List[jellyfin_api_serv
     scored_recs = []
     for rec in series_recos:
         rec['genres'] = []
-        for genre_id in rec['genre_ids'] and genre_id in series_genre_by_id_map:
-            rec['genres'].append(series_genre_by_id_map[genre_id].get('name'))
+        for genre_id in rec['genre_ids']:
+            if genre_id in series_genre_by_id_map:
+                rec['genres'].append(series_genre_by_id_map[genre_id].get('name'))
 
         score = sum(genre_counts.get(genre, 0) for genre in rec['genres'])
         scored_recs.append((score, rec))
@@ -104,8 +105,9 @@ def weight_movie_recos_by_watched_genres(watched_movies: List[jellyfin_api_servi
     scored_recs = []
     for rec in movie_recos:
         rec['genres'] = []
-        for genre_id in rec['genre_ids'] and genre_id in movie_genre_by_id_map:
-            rec['genres'].append(movie_genre_by_id_map[genre_id].get('name'))
+        for genre_id in rec['genre_ids']:
+            if genre_id in movie_genre_by_id_map:
+                rec['genres'].append(movie_genre_by_id_map[genre_id].get('name'))
 
         score = sum(genre_counts.get(genre, 0) for genre in rec['genres'])
         scored_recs.append((score, rec))
@@ -271,23 +273,23 @@ def NextUp():
 
     for user in users_to_recommend_for:
         if not DISABLE_MOVIE_RECOMMENDATIONS:
-            generate_movie_recommendations(user, float(MIN_MOVIE_WATCH_PERCENT), int(MAX_MOVIE_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_MOVIE), int(MAX_TOTAL_MOVIE_RECOMMENDATIONS))
+            helpers.safe_call(generate_movie_recommendations, user, float(MIN_MOVIE_WATCH_PERCENT), int(MAX_MOVIE_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_MOVIE), int(MAX_TOTAL_MOVIE_RECOMMENDATIONS))
         else:
             logger.info("Movie recommendations are disabled. Skipping.")
         
         if not DISABLE_SERIES_RECOMMENDATIONS:
-            generate_series_recommendations(user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES), int(MIN_EPISODE_WATCH_COUNT), int(MAX_TOTAL_SERIES_RECOMMENDATIONS))
+            helpers.safe_call(generate_series_recommendations, user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES), int(MIN_EPISODE_WATCH_COUNT), int(MAX_TOTAL_SERIES_RECOMMENDATIONS))
         else:
-            logger.info("Series recommendations are disabled. Skipping.")
+            helpers.logger.info("Series recommendations are disabled. Skipping.")
 
     if INCLUDE_POPULAR_SERIES_RECOMMENDATIONS:
-        generate_popular_series_recommendations()
+        helpers.safe_call(generate_popular_series_recommendations)
 
     if INCLUDE_POPULAR_MOVIE_RECOMMENDATIONS:
-        generate_popular_movies_recommendations()
+        helpers.safe_call(generate_popular_movies_recommendations)
     
     if INCLUDE_UPCOMING_MOVIE_RECOMMENDATIONS:
-        generate_upcoming_movies_recommendations()
+        helpers.safe_call(generate_upcoming_movies_recommendations)
 
 def start_main_loop():
     time.tzset()

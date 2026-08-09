@@ -1,7 +1,8 @@
 from fastapi import FastAPI, APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from constants.jellyfin import WEBHOOK_NOTIFICATION_TYPES, SUPPORTED_WEBHOOK_NOTIFICATION_TYPES
+from constants.jellyfin import SUPPORTED_WEBHOOK_NOTIFICATION_TYPES
 from constants.seerr import SEERR_SECRET_KEYS
+from constants.config import CONFIG_KEYS
 from services import jellyfinAPIService as jellyfin_api_service, seerrAPIService as seerr_api_service
 from utils import load_env
 from NextUp import start_main_loop, NextUp
@@ -68,6 +69,8 @@ async def run_all_recommendations(request: Request):
 async def webhook_test(request: Request):
     SEERR_API_KEY = os.environ.get(SEERR_SECRET_KEYS["SEERR_API_KEY"])
     SEERR_URL = os.environ.get(SEERR_SECRET_KEYS["SEERR_URL"])
+    AUTO_CREATE_JELLYFIN_SEERR_USER = os.environ.get(CONFIG_KEYS["AUTO_CREATE_JELLYFIN_SEERR_USER"])
+
     if not SEERR_URL and not SEERR_API_KEY:
         return
     
@@ -83,7 +86,7 @@ async def webhook_test(request: Request):
     
     match notification_type:
         case 'UserDataSaved':
-            logger.info(f"Got [{notification_type}] event from user ID [{request_user_id}]. tmdb_id: [${tmdb_id}], favorite: [${favorite}], item_type: [${item_type}], item_id: [${item_id}]")
+            logger.info(f"Got [{notification_type}] event from user ID [{request_user_id}]. tmdb_id: [{tmdb_id}], favorite: [{favorite}], item_type: [{item_type}], item_id: [{item_id}]")
         case _:
             raise HTTPException(status_code=500, detail="An unrecoverable server error occured. Please try again later.")
         
@@ -102,13 +105,14 @@ async def webhook_test(request: Request):
         return {"message": "Success"}        
     
     seerr_users = seerr_api_service.get_seerr_users()
-    request_user = next(user for user in seerr_users if user['jellyfinUserId'] == request_user_id)
+    seerr_request_user = next(user for user in seerr_users if user['jellyfinUserId'] == request_user_id)
 
-    if not request_user:
+    if not seerr_request_user:
         logger.error(f"Unable to find seerr user with Jellyfin user id {request_user_id}")
-        raise HTTPException(status_code=400, detail=f"Unable to find seerr user with Jellyfin user id {request_user_id}")
+        if not AUTO_CREATE_JELLYFIN_SEERR_USER:
+            raise HTTPException(status_code=500, detail=f"Unable to find seerr user with Jellyfin user id {request_user_id} and AUTO_CREATE_JELLYFIN_SEERR_USER is unset or false")
 
-    media_request = seerr_api_service.make_media_request(int(tmdb_id), request_user['id'], 'movie' if item_type.lower() == 'movie' else 'tv')
+    media_request = seerr_api_service.make_media_request(tmdb_id==int(tmdb_id), media_type='movie' if item_type.lower() == 'movie' else 'tv', seerr_user_id=seerr_request_user['id'], jellyfin_user_id=request_user_id, auto_create_user=AUTO_CREATE_JELLYFIN_SEERR_USER)
     logger.info(f"Request for tmdb id {tmdb_id} created with id {media_request['id']}")
 
     jellyfin_api_service.delete_item_by_id(item_id)

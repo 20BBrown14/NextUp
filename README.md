@@ -186,6 +186,7 @@ NextUp uses a configuration file, `config.env` to customize NextUp Behavior.
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | NEXTUP_RECOMMENDATIONS_DIR | `/recommendations` | Base directory for NextUp to create recommendations in | ❌         |
 | PLACEHOLDER_FILE_PATH | `/movie.mp4` | The path to the video file to use as a placeholder for the recommendations. If using Docker the file must be passed to the container. If not passed the default video file will be used. | ❌         |
+| AUTO_CREATE_JELLYFIN_SEERR_USER| false | Whether Seerr should attempt to auto import a Jellyfin user when they favorite an item but don't have a Jellyseerr user yet. | ❌ |
 
 ### WatchState
 | Name             | Default | Description                                | Required    |

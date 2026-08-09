@@ -83,7 +83,7 @@ async def webhook_test(request: Request):
     
     match notification_type:
         case 'UserDataSaved':
-            logger.info(f"Got {notification_type} event.")
+            logger.info(f"Got [{notification_type}] event from user ID [{request_user_id}]. tmdb_id: [${tmdb_id}], favorite: [${favorite}], item_type: [${item_type}], item_id: [${item_id}]")
         case _:
             raise HTTPException(status_code=500, detail="An unrecoverable server error occured. Please try again later.")
         

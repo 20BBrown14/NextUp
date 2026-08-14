@@ -8,6 +8,7 @@ compose.yaml
 todo.md
 file_test.mp4
 recommendations
+config/log/**/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

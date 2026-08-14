@@ -80,7 +80,7 @@ services:
       - APP_PORT=5777
     volumes:
       - /path/to/recommendations:/recommendations
-      - /path/to/config/config.env:/config.env
+      - /path/to/config:/config
 ```
 
 #### Run
@@ -93,7 +93,7 @@ docker run -d \
   -e APP_HOST=0.0.0.0 \
   -e APP_PORT=5777 \
   -v /path/to/recommendations:/recommendations \
-  -v /path/to/config/config.env:/config.env \
+  -v /path/to/config:/config \
   ghcr.io/20bbrown14/nextup:latest
 ```
 

@@ -9,7 +9,7 @@ def load_env():
     logger = logger.get_logger(__name__)
 
     try:
-        dotenv_path = join(sys.path[0], 'config.env')
+        dotenv_path = join(sys.path[0], '/config/config.env')
         load_dotenv(dotenv_path)
     except Exception as e:
         logger.error(f"An error occurred loading env: {e}")

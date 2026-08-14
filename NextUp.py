@@ -8,6 +8,7 @@ from datetime import datetime
 from schemas.jellyfin.models import UserDto
 from schemas.jellyfin.jellyfin import JellyfinMetadata
 import math
+import json
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import time
@@ -48,7 +49,20 @@ def write_recos_to_filesystem(base_path: str, metadata_json: List[JellyfinMetada
     if type.lower() not in ['movie', 'series']:
         raise Exception(f"Type must be one of [movie, series]. Got {type}")
 
-    new_reco_dir_names = [f"{base_path}/{metadata.get('name')} ({datetime.strptime(metadata.get('firstAirDate' if type == 'series' else 'releaseDate'), "%Y-%m-%d").year})" for metadata in metadata_json]
+    new_reco_dir_names = []
+    for metadata in metadata_json:
+        date_key = 'firstAirDate' if type == 'series' else 'releaseDate'
+        date_str = metadata.get(date_key) or ''
+        year = date_str[:4] if len(date_str) >= 4 else None
+        if year == None:
+            logger.info(
+                f"Could not find year information for recommendation:\n"
+                f"{json.dumps(metadata, indent=2)}"
+            )
+            continue
+        
+        new_reco_dir_names.append(f"{base_path}/{metadata.get('name')} ({year})")
+ 
     if filesystem.does_path_exist(f"{base_path}"):
         existing_recos_dirs = filesystem.get_all_dirs_in_dir(f"{base_path}")
         
@@ -61,7 +75,18 @@ def write_recos_to_filesystem(base_path: str, metadata_json: List[JellyfinMetada
 
 
     for metadata in metadata_json:
-        release_year = datetime.strptime(metadata.get('firstAirDate' if type == 'series' else 'releaseDate'), "%Y-%m-%d").year
+        date_key = 'firstAirDate' if type == 'series' else 'releaseDate'
+        date_str = metadata.get(date_key) or ''
+        
+        release_year = date_str[:4] if len(date_str) >= 4 else None
+        
+        if release_year is None:
+            logger.info(
+                f"Could not find year information for recommendation:\n"
+                f"{json.dumps(metadata, indent=2)}"
+            )
+            continue
+
         dir_name = f"{base_path}/{metadata.get('name' if type == 'series' else 'title')} ({release_year})"
         filesystem.create_directory(f"{dir_name}")
         filesystem.save_json(f"{dir_name}/metadata.json", metadata)

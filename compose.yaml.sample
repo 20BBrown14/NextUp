@@ -1,0 +1,18 @@
+services:
+  server:
+    container_name: nextup_dev
+    build:
+      context: .
+    ports:
+      - 8888:8888
+    env_file: config/config.env
+    user: "1000:1000"
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8888
+      - ENV=dev
+    volumes:
+      # Local recommendations for testing
+      - /path/to/dev-NextUp/recommendations:/recommendations
+      - /path/to/dev-NextUp/config:/config
+      - .:/app

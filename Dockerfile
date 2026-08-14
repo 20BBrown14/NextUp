@@ -11,31 +11,31 @@
 ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim
 
-# Prevents Python from writing pyc files.
-ENV PYTHONDONTWRITEBYTECODE=1
+# Define timezone ARG with default UTC, then assign it to the TZ ENV variable
+ARG TZ=UTC
+ENV TZ=${TZ}
 
-# Keeps Python from buffering stdout and stderr to avoid situations where
-# the application crashes without emitting any logs due to buffering.
+# Prevents Python from writing pyc files and buffering output
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
-# Leverage a bind mount to requirements.txt to avoid having to copy them into
-# into this layer.
+# Download dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     python -m pip install -r requirements.txt
 
-
-# Copy the source code into the container.
+# Copy source code and scripts into the container
 COPY . .
 
-# Expose the port that the application listens on.
+# Ensure the rotation script is executable
+RUN chmod +x /app/scripts/rotate_logs.sh
+
+ENV ENV=prod
 ENV APP_HOST=0.0.0.0
 ENV APP_PORT=5777
 EXPOSE $APP_PORT
 
-# Run the application.
-CMD ["sh", "-c", "RELOAD=\"\"; [ \"$ENV\" = \"dev\" ] && RELOAD=\"--reload\"; fastapi run server.py --host ${APP_HOST} --port ${APP_PORT} $RELOAD"]
+# Execute log rotation script first to get the log file path, then launch FastAPI
+CMD ["sh", "-c", "LOG_FILE=$(sh /app/scripts/rotate_logs.sh); RELOAD=\"\"; [ \"$ENV\" = \"dev\" ] && RELOAD=\"--reload\"; fastapi run server.py --host ${APP_HOST} --port ${APP_PORT} $RELOAD 2>&1 | tee -a \"$LOG_FILE\""]

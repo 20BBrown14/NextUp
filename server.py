@@ -112,7 +112,7 @@ async def webhook_test(request: Request):
         if not AUTO_CREATE_JELLYFIN_SEERR_USER:
             raise HTTPException(status_code=500, detail=f"Unable to find seerr user with Jellyfin user id {request_user_id} and AUTO_CREATE_JELLYFIN_SEERR_USER is unset or false")
 
-    media_request = seerr_api_service.make_media_request(tmdb_id==int(tmdb_id), media_type='movie' if item_type.lower() == 'movie' else 'tv', seerr_user_id=seerr_request_user['id'], jellyfin_user_id=request_user_id, auto_create_user=AUTO_CREATE_JELLYFIN_SEERR_USER)
+    media_request = seerr_api_service.make_media_request(tmdb_id=int(tmdb_id), media_type='movie' if item_type.lower() == 'movie' else 'tv', seerr_user_id=seerr_request_user['id'], jellyfin_user_id=request_user_id, auto_create_user=AUTO_CREATE_JELLYFIN_SEERR_USER)
     logger.info(f"Request for tmdb id {tmdb_id} created with id {media_request['id']}")
 
     jellyfin_api_service.delete_item_by_id(item_id)

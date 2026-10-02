@@ -1,5 +1,8 @@
 import requests
 import os
+import threading
+from cachetools import TTLCache, cached
+from cachetools.keys import hashkey
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from utils.fetch import make_request
 from utils.helpers import parse_jellyfin_date
@@ -19,6 +22,17 @@ class Movie(NamedTuple):
         id: str
         genres: List[str]
         tmdb_id: str
+
+# ---------------------------------------------------------------------------
+# Cache stores
+#
+# _token_cache – WatchState auth token. Tokens are short-lived session
+#                credentials; a 10-minute TTL keeps the token fresh without
+#                re-authenticating on every single API request.
+# ---------------------------------------------------------------------------
+
+_cache_lock = threading.Lock()
+_token_cache: TTLCache = TTLCache(maxsize=1, ttl=600)  # 10 minutes
 
 user_token = None
 
@@ -85,6 +99,7 @@ def _make_authenticated_watchstate_api_request(
     }
     return make_request(request_url, method, params, body, headers, timeout)
 
+@cached(cache=_token_cache, key=lambda: hashkey('auth_token'), lock=_cache_lock)
 def auth_user() -> requests.Response:
     global user_token
     WATCHSTATE_USERNAME = os.environ.get(WATCHSTATE_SECRET_KEYS["WATCHSTATE_USERNAME"])

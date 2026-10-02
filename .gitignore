@@ -9,6 +9,9 @@ todo.md
 file_test.mp4
 recommendations
 config/log/**/*
+jellyfin-openapi-stable.json
+tmdb-api-md.md
+pyvenv.cfg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -59,6 +62,9 @@ __pypackages__/
 # Environments
 .env
 .venv
+.aider*
+bin/**/*
+lib64/**/*
 env/
 venv/
 ENV/

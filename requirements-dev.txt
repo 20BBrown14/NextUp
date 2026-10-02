@@ -1,0 +1,11 @@
+# Development / test dependencies.
+# Install with:  bin/python -m pip install -r requirements-dev.txt
+# Includes everything in requirements.txt plus the test tooling.
+-r requirements.txt
+
+pytest==9.1.1
+coverage==7.16.2
+
+# Transitive dependencies of pytest, pinned for reproducible installs.
+pluggy==1.6.0
+iniconfig==2.3.0

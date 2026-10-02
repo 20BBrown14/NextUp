@@ -4,6 +4,7 @@ anyio==4.12.1
 APScheduler==3.11.2
 argcomplete==3.6.3
 black==26.3.1
+cachetools==7.2.0
 certifi==2026.2.25
 charset-normalizer==3.4.5
 click==8.3.1

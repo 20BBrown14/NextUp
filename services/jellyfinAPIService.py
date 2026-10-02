@@ -1,5 +1,8 @@
 import requests
 import os
+import threading
+from cachetools import TTLCache, LRUCache, cached
+from cachetools.keys import hashkey
 from constants.jellyfin import JELLYFIN_SECRET_KEYS
 from utils.fetch import make_request
 from utils.helpers import parse_jellyfin_date, convert_string_to_uuid
@@ -22,6 +25,32 @@ class Movie(NamedTuple):
         genres: List[str]
         tmdb_id: str # This should be last
 
+
+# ---------------------------------------------------------------------------
+# Cache stores
+#
+# _library_cache  – available movies/series on the server. These only change
+#                   when media is added or removed.
+#
+# _item_meta_cache – per-item TMDB IDs and genre lists keyed on a frozenset
+#                    of Jellyfin item IDs. Metadata on existing library items
+#                    never changes, so this cache has no expiry and only evicts
+#                    when it reaches its size cap.
+#
+# _user_cache      – the Jellyfin user list. Users are rarely added/removed;
+#                    a 30-minute TTL avoids unnecessary chatter.
+#
+# A single lock is shared across all caches because cachetools caches are not
+# thread-safe by default and APScheduler runs jobs on background threads.
+# ---------------------------------------------------------------------------
+
+_cache_lock = threading.Lock()
+
+_library_cache: TTLCache = TTLCache(maxsize=50, ttl=7200)    # 2 hours
+_item_meta_cache: LRUCache = LRUCache(maxsize=1000)           # no expiry, evicts oldest when full
+_user_cache: TTLCache = TTLCache(maxsize=5, ttl=1800)         # 30 minutes
+
+
 def _make_authenticated_jellyfin_api_request(
     url: str,
     method: str = "GET",
@@ -39,7 +68,11 @@ def _make_authenticated_jellyfin_api_request(
         "Authorization": f"MediaBrowser Token=\"{JELLYFIN_API_KEY}\""
     }
     return make_request(request_url, method, params, body, headers, timeout)
-    
+
+
+# --- User list (stable, 30-minute TTL) -------------------------------------
+
+@cached(cache=_user_cache, key=lambda: hashkey('users'), lock=_cache_lock)
 def get_users() -> List[UserDto]:
     users = _make_authenticated_jellyfin_api_request('Users').json()
     return users
@@ -49,7 +82,13 @@ def get_configured_users() -> List[UserDto]:
     configured_users = os.environ.get(JELLYFIN_SECRET_KEYS["JELLYFIN_USERS"]).lower().split(',')
     return [user for user in all_users if user['Name'].lower() in configured_users]
 
+
 # Guaranteed to return in the same order, None for missing values
+@cached(
+    cache=_item_meta_cache,
+    key=lambda series_ids: hashkey('series_provider_ids', frozenset(series_ids)),
+    lock=_cache_lock
+)
 def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[List[str]]:
     params = {
         "Fields": "ProviderIds",
@@ -64,6 +103,11 @@ def get_series_provider_ids_by_ids(series_ids: List[str]) -> List[List[str]]:
     return tmdb_list
 
 # Guaranteed to return in the same order, None for missing values
+@cached(
+    cache=_item_meta_cache,
+    key=lambda movie_ids: hashkey('movie_provider_ids', frozenset(movie_ids)),
+    lock=_cache_lock
+)
 def get_movies_provider_ids_by_ids(movie_ids: List[str]) -> List[List[str]]:
     params = {
         "Fields": "ProviderIds",
@@ -77,6 +121,11 @@ def get_movies_provider_ids_by_ids(movie_ids: List[str]) -> List[List[str]]:
 
     return tmdb_list
 
+@cached(
+    cache=_item_meta_cache,
+    key=lambda series_ids: hashkey('series_genres', frozenset(series_ids)),
+    lock=_cache_lock
+)
 def get_series_genres_by_ids(series_ids: List[str]) -> List[List[str]]:
     params = {
         "Fields": "Genres",
@@ -87,10 +136,15 @@ def get_series_genres_by_ids(series_ids: List[str]) -> List[List[str]]:
     series_list = cast(List[BaseItemDto], raw_series_list)
 
     raw_genre_list = [series.get("Genres", []) for series in series_list]
-    genre_list = [genre.lower() for genre in raw_genre_list]
+    genre_list = [[genre.lower() for genre in genres] for genres in raw_genre_list]
 
     return genre_list
 
+@cached(
+    cache=_item_meta_cache,
+    key=lambda movie_ids: hashkey('movie_genres', frozenset(movie_ids)),
+    lock=_cache_lock
+)
 def get_movie_genres_by_ids(movie_ids: List[str]) -> List[List[str]]:
     params = {
         "Fields": "Genres",
@@ -101,9 +155,12 @@ def get_movie_genres_by_ids(movie_ids: List[str]) -> List[List[str]]:
     movies_list = cast(List[BaseItemDto], raw_movies_list)
 
     raw_genre_list = [movies.get("Genres", []) for movies in movies_list]
-    genre_list = [genre.lower() for genre in raw_genre_list]
+    genre_list = [[genre.lower() for genre in genres] for genres in raw_genre_list]
 
     return genre_list
+
+
+# --- Watch history (volatile – not cached) ----------------------------------
 
 def get_user_watched_series_ids(user_id: str, max_days: int = None, min_episode_watch_count: int = None) -> List[Series]:    
     params = {
@@ -214,6 +271,14 @@ def get_all_user_movies(user_id: str, max_days: int = None, min_progress_percent
     genre_list = get_movie_genres_by_ids(movie_ids)
     return [Movie(*movie, genre_list[index] or [], tmdb_id_list[index]) for index, movie in enumerate(filtered_user_movie_list) if tmdb_id_list[index] is not None]
 
+
+# --- Library availability (stable, 2-hour TTL) ------------------------------
+
+@cached(
+    cache=_library_cache,
+    key=lambda user_id=None: hashkey('available_movies', user_id),
+    lock=_cache_lock
+)
 def get_all_available_movies(user_id: str = None) -> List[str]:
     RAW_MOVIE_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["MOVIE_LIBRARY_IDS"])
     MOVIE_LIBRARY_IDS = RAW_MOVIE_LIBRARY_IDS.rsplit(',') if RAW_MOVIE_LIBRARY_IDS else []
@@ -244,6 +309,11 @@ def get_all_available_movies(user_id: str = None) -> List[str]:
     movie_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in movie_list]
     return [int(id) for id in movie_tmdb_id_list if id is not None]
 
+@cached(
+    cache=_library_cache,
+    key=lambda user_id=None: hashkey('available_series', user_id),
+    lock=_cache_lock
+)
 def get_all_available_series(user_id: str = None) -> List[int]:
     RAW_SERIES_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["SERIES_LIBRARY_IDS"])
     SERIES_LIBRARY_IDS = RAW_SERIES_LIBRARY_IDS.rsplit(',') if RAW_SERIES_LIBRARY_IDS else []
@@ -275,10 +345,9 @@ def get_all_available_series(user_id: str = None) -> List[int]:
     series_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in series_list]
     return [int(id) for id in series_tmdb_id_list if id is not None]
 
+
 def delete_item_by_id(item_id: str):
     if not item_id:
         return
     
     return _make_authenticated_jellyfin_api_request(f"Items/{convert_string_to_uuid(item_id)}", method='DELETE')
-
-

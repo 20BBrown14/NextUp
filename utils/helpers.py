@@ -37,14 +37,6 @@ def create_map_by_id(items, id_key):
     return {item[id_key]: item for item in items}
 
 def to_int_ids(ids):
-    """Normalize an iterable of TMDB ids to a set of ints.
-
-    TMDB ids are integers, but watch-history sources surface them as strings
-    (WatchState ``guid_tmdb`` and Jellyfin ``ProviderIds.Tmdb``) while the
-    available-library and recommendation ids are ints. Mixing the two in a
-    membership check silently fails, so callers normalize to a single type.
-    Values that are ``None`` or not convertible to an int are skipped.
-    """
     normalized = set()
     for id in ids or []:
         if id is None:

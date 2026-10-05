@@ -4,6 +4,7 @@ from constants.config import CONFIG_KEYS
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from adapters import jellyfin as jellyfin_adapter
 import os
+import requests
 from datetime import datetime
 from schemas.jellyfin.models import UserDto
 from schemas.jellyfin.jellyfin import JellyfinMetadata
@@ -41,7 +42,13 @@ def get_all_user_watched_series(user: UserDto, max_days_lookback: int, min_episo
             watched_series = watchstate_api_service.get_user_watched_series(user.get('Name').lower(), max_days_lookback, min_episode_watch_count)
         else:
             watched_series = jellyfin_api_service.get_user_watched_series_ids(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_episode_watch_count)
-    except:
+    except requests.exceptions.HTTPError as e:
+        # A 404 means this user simply has no WatchState identity / no matching
+        # history, which is an expected "skip this user" case. Any other HTTP
+        # error (500, auth, etc.) is a real failure and must propagate so it is
+        # not silently reported as "no history".
+        if getattr(e.response, "status_code", None) != 404:
+            raise
         logger.info(f"Found no series watch history for Jelly user {user.get('Name').lower()}")
     return watched_series
 
@@ -153,7 +160,13 @@ def generate_movie_recommendations(user: UserDto, min_watch_percent: float, max_
             watched_movies = watchstate_api_service.get_user_watched_movies(user.get('Name').lower(), max_days_lookback)
         else:
             watched_movies = jellyfin_api_service.get_all_user_movies(helpers.convert_string_to_uuid(user.get("Id")), max_days_lookback, min_watch_percent)
-    except:
+    except requests.exceptions.HTTPError as e:
+        # A 404 means this user simply has no WatchState identity / no matching
+        # history, which is an expected "skip this user" case. Any other HTTP
+        # error (500, auth, etc.) is a real failure and must propagate so it is
+        # not silently reported as "no history".
+        if getattr(e.response, "status_code", None) != 404:
+            raise
         logger.info(f"Found no movie watch history for Jellyfin user {user.get('Name').lower()}")
 
 
@@ -272,7 +285,7 @@ def NextUp():
     global ROOT_RECOMMENDATIONS_DIR_PATH
     ROOT_RECOMMENDATIONS_DIR_PATH = os.environ.get(CONFIG_KEYS["NEXTUP_RECOMMENDATIONS_DIR"], '/recommendations')
     GENERATE_RECOS_FOR = os.environ.get(CONFIG_KEYS["GENERATE_RECOS_FOR"], '')
-    generate_recos_for_list = [name.lower() for name in GENERATE_RECOS_FOR.rsplit(',')]
+    generate_recos_for_list = [name.lower().strip() for name in GENERATE_RECOS_FOR.rsplit(',')]
     filtered_generated_recos_for_list = [name for name in generate_recos_for_list if name]
     
     DISABLE_MOVIE_RECOMMENDATIONS = os.environ.get(CONFIG_KEYS['DISABLE_MOVIE_RECOMMENDATIONS']).lower() == 'true'

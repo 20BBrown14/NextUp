@@ -1,11 +1,16 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import os
+import time
 from datetime import date, timedelta
+
+import requests
 
 import services.watchstateAPIService as ws
 from services.watchstateAPIService import (
     auth_user,
+    _login,
+    refresh_token,
     _make_authenticated_watchstate_api_request,
     _fetch_all_paginated_data,
     get_user_watched_movies,
@@ -25,6 +30,13 @@ def _make_mock_response(data) -> MagicMock:
     mock = MagicMock()
     mock.json.return_value = data
     return mock
+
+
+def _http_error(status: int) -> requests.exceptions.HTTPError:
+    """Build an HTTPError carrying a response with the given status code."""
+    resp = MagicMock()
+    resp.status_code = status
+    return requests.exceptions.HTTPError(response=resp)
 
 
 def _page(data_key: str, items: list, next_page=None) -> dict:
@@ -250,6 +262,7 @@ class TestGetUserWatchedMovies(WatchStateTestBase):
         self.assertEqual(params['type'], 'movie')
         self.assertEqual(params['watched'], 1)
         self.assertEqual(params['perpage'], 100)
+        self.assertEqual(params['view'], ws._HISTORY_VIEW_FIELDS)
 
     @patch('services.watchstateAPIService._fetch_all_paginated_data')
     def test_maps_main_user_to_main_header(self, mock_fetch):
@@ -355,9 +368,12 @@ class TestGetUserWatchedSeries(WatchStateTestBase):
         with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
             get_user_watched_series('alice', min_episode_watch_count=1)
         params = mock_fetch.call_args[1]['params']
-        self.assertEqual(params['type'], 'series')
+        # The WatchState history API types are only movie/episode; shows are
+        # queried as their episodes.
+        self.assertEqual(params['type'], 'episode')
         self.assertEqual(params['watched'], 1)
         self.assertEqual(params['perpage'], 200)
+        self.assertEqual(params['view'], ws._HISTORY_VIEW_FIELDS)
 
     @patch('services.watchstateAPIService._fetch_all_paginated_data')
     def test_lowercases_genres(self, mock_fetch):
@@ -425,6 +441,288 @@ class TestGetUserWatchedSeries(WatchStateTestBase):
             result = get_user_watched_series('alice', max_lookback_days=30, min_episode_watch_count=1)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].id, 'epoch')
+
+
+# ===========================================================================
+# Non-dict / missing guid handling + skip-no-tmdb (hardening #1, #2, #3)
+# ===========================================================================
+
+class TestMovieGuidHardening(WatchStateTestBase):
+
+    def _record(self, guids, played_at=None):
+        today = date.today()
+        return {
+            'title': 'Film',
+            'metadata': {'jellyfin': {
+                'id': 'jf-1',
+                'played_at': played_at if played_at is not None else f"{today.isoformat()}T00:00:00Z",
+                'extra': {'genres': ['Action']},
+            }},
+            'guids': guids,
+        }
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_skips_movie_when_guids_is_list(self, mock_fetch):
+        # Top-level `guids` can be an empty list for some records; must not crash.
+        mock_fetch.return_value = [self._record(guids=[])]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_movies('alice')
+        self.assertEqual(result, [])
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_skips_movie_without_tmdb_id(self, mock_fetch):
+        mock_fetch.return_value = [self._record(guids={'guid_imdb': 'tt1'})]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_movies('alice')
+        self.assertEqual(result, [])
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_keeps_movie_with_tmdb_id(self, mock_fetch):
+        mock_fetch.return_value = [self._record(guids={'guid_tmdb': '42'})]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_movies('alice')
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].tmdb_id, '42')
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_parses_int_epoch_played_at(self, mock_fetch):
+        # Movies can return played_at as an int; parse_jellyfin_date raises
+        # AttributeError which must be caught and fall through to fromtimestamp.
+        rec = self._record(guids={'guid_tmdb': '42'}, played_at=int(time.time()))
+        mock_fetch.return_value = [rec]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_movies('alice', max_lookback_days=30)
+        self.assertEqual(len(result), 1)
+
+
+class TestSeriesParentHardening(WatchStateTestBase):
+
+    def _episode(self, parent, show_id='show-1', played_at=None):
+        today = date.today()
+        return {
+            'metadata': {'jellyfin': {
+                'title': 'Show',
+                'show': show_id,
+                'played_at': played_at if played_at is not None else f"{today.isoformat()}T00:00:00Z",
+                'parent': parent,
+                'extra': {'genres': ['Drama']},
+            }},
+        }
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_skips_episode_when_parent_is_list(self, mock_fetch):
+        # The real crash: parent came back as an empty list ([].get -> error).
+        mock_fetch.return_value = [self._episode(parent=[])]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_series('alice', min_episode_watch_count=1)
+        self.assertEqual(result, [])
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_skips_episode_when_parent_missing(self, mock_fetch):
+        ep = self._episode(parent=None)
+        ep['metadata']['jellyfin'].pop('parent')
+        mock_fetch.return_value = [ep]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_series('alice', min_episode_watch_count=1)
+        self.assertEqual(result, [])
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_skips_episode_without_parent_tmdb(self, mock_fetch):
+        mock_fetch.return_value = [self._episode(parent={'guid_tvdb': '900'})]
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_series('alice', min_episode_watch_count=1)
+        self.assertEqual(result, [])
+
+    @patch('services.watchstateAPIService._fetch_all_paginated_data')
+    def test_no_tmdb_episodes_do_not_count_toward_series(self, mock_fetch):
+        # Two good episodes of one show + one no-tmdb episode of another; only
+        # the show meeting the min count via tmdb-bearing episodes survives.
+        good = [self._episode(parent={'guid_tmdb': '7'}, show_id='good')] * 2
+        junk = [self._episode(parent=[], show_id='junk')] * 5
+        mock_fetch.return_value = good + junk
+        with patch.dict(os.environ, {'WATCHSTATE_MAIN_USER_TO_JELLYFIN_MAP': ''}):
+            result = get_user_watched_series('alice', min_episode_watch_count=2)
+        self.assertEqual([s.id for s in result], ['good'])
+
+
+# ===========================================================================
+# _fetch_all_paginated_data response-shape guards (hardening #4, #5)
+# ===========================================================================
+
+class TestFetchAllPaginatedDataHardening(WatchStateTestBase):
+
+    @patch('services.watchstateAPIService._make_authenticated_watchstate_api_request')
+    def test_missing_paging_treated_as_single_page(self, mock_req):
+        # No paging key at all -> return page 1 items, no crash.
+        mock_req.return_value = _make_mock_response({'history': [1, 2, 3]})
+        result = _fetch_all_paginated_data('history', params={}, data_key='history')
+        self.assertEqual(result, [1, 2, 3])
+        mock_req.assert_called_once()
+
+    @patch('services.watchstateAPIService._make_authenticated_watchstate_api_request')
+    def test_non_dict_response_raises_clear_error(self, mock_req):
+        mock_req.return_value = _make_mock_response([1, 2, 3])
+        with self.assertRaises(Exception) as ctx:
+            _fetch_all_paginated_data('history', params={}, data_key='history')
+        self.assertIn('history', str(ctx.exception))
+        self.assertIn('page 1', str(ctx.exception))
+
+    @patch('services.watchstateAPIService._make_authenticated_watchstate_api_request')
+    def test_non_list_data_key_raises_clear_error(self, mock_req):
+        mock_req.return_value = _make_mock_response({'history': {'nope': 1}, 'paging': {'next_page': None}})
+        with self.assertRaises(Exception) as ctx:
+            _fetch_all_paginated_data('history', params={}, data_key='history')
+        self.assertIn('list', str(ctx.exception))
+
+    @patch('services.watchstateAPIService._make_authenticated_watchstate_api_request')
+    def test_malformed_later_page_raises_with_page_number(self, mock_req):
+        mock_req.side_effect = [
+            _make_mock_response(_page('history', [1, 2], next_page=2)),
+            _make_mock_response({'paging': {'next_page': None}}),  # history missing on page 2
+        ]
+        with self.assertRaises(Exception) as ctx:
+            _fetch_all_paginated_data('history', params={}, data_key='history')
+        self.assertIn('page 2', str(ctx.exception))
+
+    @patch('services.watchstateAPIService._make_authenticated_watchstate_api_request')
+    def test_passes_params_through_on_each_page(self, mock_req):
+        mock_req.side_effect = [
+            _make_mock_response(_page('history', [1], next_page=2)),
+            _make_mock_response(_page('history', [2], next_page=None)),
+        ]
+        _fetch_all_paginated_data('history', params={'perpage': 50}, data_key='history')
+        # Both pages carry perpage and the correct page number.
+        first_params = mock_req.call_args_list[0][0][2]
+        second_params = mock_req.call_args_list[1][0][2]
+        self.assertEqual(first_params['perpage'], 50)
+        self.assertEqual(first_params['page'], 1)
+        self.assertEqual(second_params['perpage'], 50)
+        self.assertEqual(second_params['page'], 2)
+
+
+# ===========================================================================
+# _login / refresh_token (token refresh with re-login fallback, #8)
+# ===========================================================================
+
+class TestLoginAndRefresh(WatchStateTestBase):
+
+    @patch('services.watchstateAPIService.make_request')
+    def test_login_sets_and_returns_token(self, mock_req):
+        mock_req.return_value = _make_mock_response({'token': 'tok-1'})
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws', 'WATCHSTATE_USERNAME': 'u', 'WATCHSTATE_PASSWORD': 'p'}):
+            out = _login()
+        self.assertEqual(out, 'tok-1')
+        self.assertEqual(ws.user_token, 'tok-1')
+
+    @patch('services.watchstateAPIService.make_request')
+    def test_refresh_uses_refresh_endpoint_with_current_token(self, mock_req):
+        ws.user_token = 'old'
+        mock_req.return_value = _make_mock_response({'token': 'new'})
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}):
+            out = refresh_token()
+        self.assertEqual(out, 'new')
+        self.assertEqual(ws.user_token, 'new')
+        url = mock_req.call_args[0][0]
+        headers = mock_req.call_args.kwargs.get('headers') or {}
+        self.assertEqual(url, 'http://ws/v1/api/system/auth/refresh')
+        self.assertEqual(headers.get('Authorization'), 'Token old')
+
+    @patch('services.watchstateAPIService._login', return_value='fresh')
+    def test_refresh_without_current_token_relogins(self, mock_login):
+        ws.user_token = None
+        out = refresh_token()
+        self.assertEqual(out, 'fresh')
+        mock_login.assert_called_once()
+
+    @patch('services.watchstateAPIService._login', return_value='fresh')
+    @patch('services.watchstateAPIService.make_request')
+    def test_refresh_failure_falls_back_to_login_and_logs(self, mock_req, mock_login):
+        ws.user_token = 'old'
+        mock_req.side_effect = _http_error(401)
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}), \
+             patch.object(ws.logger, 'warning') as mock_warn:
+            out = refresh_token()
+        self.assertEqual(out, 'fresh')
+        mock_login.assert_called_once()
+        self.assertTrue(mock_warn.called)
+
+    @patch('services.watchstateAPIService._login', return_value='fresh')
+    @patch('services.watchstateAPIService.make_request')
+    def test_refresh_response_without_token_falls_back(self, mock_req, mock_login):
+        ws.user_token = 'old'
+        mock_req.return_value = _make_mock_response({'no_token': True})
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}), \
+             patch.object(ws.logger, 'warning'):
+            out = refresh_token()
+        self.assertEqual(out, 'fresh')
+        mock_login.assert_called_once()
+
+
+# ===========================================================================
+# 401 retry / compare-and-refresh in request path (#9)
+# ===========================================================================
+
+class TestRequest401Retry(WatchStateTestBase):
+
+    @patch('services.watchstateAPIService.auth_user')
+    @patch('services.watchstateAPIService.refresh_token')
+    @patch('services.watchstateAPIService.make_request')
+    def test_401_triggers_refresh_and_retries_once(self, mock_req, mock_refresh, mock_auth):
+        ws.user_token = 'old'
+
+        def refresh_side():
+            ws.user_token = 'new'
+            return 'new'
+        mock_refresh.side_effect = refresh_side
+
+        ok = MagicMock()
+        mock_req.side_effect = [_http_error(401), ok]
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}):
+            out = _make_authenticated_watchstate_api_request('history')
+        self.assertIs(out, ok)
+        mock_refresh.assert_called_once()
+        self.assertEqual(mock_req.call_count, 2)
+
+    @patch('services.watchstateAPIService.auth_user')
+    @patch('services.watchstateAPIService.refresh_token')
+    @patch('services.watchstateAPIService.make_request')
+    def test_non_401_propagates_without_refresh(self, mock_req, mock_refresh, mock_auth):
+        ws.user_token = 'tok'
+        mock_req.side_effect = _http_error(500)
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}):
+            with self.assertRaises(requests.exceptions.HTTPError):
+                _make_authenticated_watchstate_api_request('history')
+        mock_refresh.assert_not_called()
+
+    @patch('services.watchstateAPIService.auth_user')
+    @patch('services.watchstateAPIService.refresh_token')
+    @patch('services.watchstateAPIService.make_request')
+    def test_compare_and_refresh_skips_when_token_already_rotated(self, mock_req, mock_refresh, mock_auth):
+        # Simulate another thread rotating the token between the failed attempt
+        # and the retry handler acquiring the lock -> no refresh should happen.
+        ws.user_token = 'tokA'
+        ok = MagicMock()
+
+        def side(*a, **k):
+            if mock_req.call_count == 1:
+                ws.user_token = 'tokB'  # rotated elsewhere
+                raise _http_error(401)
+            return ok
+        mock_req.side_effect = side
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}):
+            out = _make_authenticated_watchstate_api_request('history')
+        self.assertIs(out, ok)
+        mock_refresh.assert_not_called()
+
+    @patch('services.watchstateAPIService.auth_user')
+    @patch('services.watchstateAPIService.make_request')
+    def test_injects_token_header(self, mock_req, mock_auth):
+        ws.user_token = 'my-token'
+        mock_req.return_value = MagicMock()
+        with patch.dict(os.environ, {'WATCHSTATE_URL': 'http://ws'}):
+            _make_authenticated_watchstate_api_request('history')
+        headers = mock_req.call_args[0][4]
+        self.assertEqual(headers['Authorization'], 'Token my-token')
 
 
 if __name__ == '__main__':

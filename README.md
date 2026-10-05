@@ -1,7 +1,7 @@
 # NextUp
-NextUp is a program that allows [Jellyfin](https://jellyfin.org/) admins to generate user personalized movie and series recommendations directly in Jellyfin regardless of client using Jellyfin libraries. User are also able to generate media requests in [Seer](https://seerr.dev/) right from the Jellyfin UI by "favoriting" the media in their recommendations.
+NextUp is a program that allows [Jellyfin](https://jellyfin.org/) admins to generate user personalized movie and series recommendations directly in Jellyfin regardless of client using Jellyfin libraries. Users are also able to generate media requests in [Seer](https://seerr.dev/) right from the Jellyfin UI by "favoriting" the media in their recommendations.
 
-NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchstate) to allow for more long live watch history to improve recommendations and avoid getting recommendations for media the user has already watched but might have been removed from the server.
+NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchstate) to allow for more long-lived watch history to improve recommendations and avoid getting recommendations for media the user has already watched but might have been removed from the server.
 
 # Table of Contents
 - [Features](#features)
@@ -35,7 +35,7 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 - Support for any number of users
 - Can create popular movies, popular series, and upcoming movie recommendations
 - CRON expression supported for flexible scheduling
-- Optional WatchState integration for long lived watch history
+- Optional WatchState integration for long-lived watch history
 - Optional Seerr integration to generate requests from Jellyfin UI
 
 ## How it Works
@@ -48,7 +48,7 @@ NextUp never adds any recommendations if the user already has access to the medi
 **The Placeholder video is created once in a `NextUp` directory of your recommendations path and is then hard-linked to recommendations directories to avoid duplicating data.**
 
 ### Watch History Limitation
-Jellyfin's API only returns watch history for media currently on the server therefore users with a small changing library would not get the benefit of a long standing watch history to pull recommendations from.
+Jellyfin's API only returns watch history for media currently on the server therefore users with a small changing library would not get the benefit of a long-standing watch history to pull recommendations from.
 
 [WatchState](https://github.com/arabcoders/watchstate) is a self-hosted tool that was originally designed to 
 > sync your backends users play state without relying on third party services
@@ -163,7 +163,7 @@ NextUp uses a configuration file, `config.env` to customize NextUp Behavior.
 
 | Name             | Default | Description                                | Required    |
 | ---------------- | ------- | ------------------------------------------ | ----------- |
-| JELLYFIN_API_KEY |         | API key used to authenticate with Jellfyin | ✔️         |
+| JELLYFIN_API_KEY |         | API key used to authenticate with Jellyfin | ✔️         |
 | JELLYFIN_URL     |         | Base Jellyfin URL                          | ✔️         |
 
 ### Seerr
@@ -205,6 +205,8 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | GENERATE_RECOS_FOR | (All users) | Comma separated list of users to generate recos for. Not providing this will generate recos for all Jellyfin users | ❌         |
 | RECOMMENDATIONS_CRON_SCHEDULE |         | Cron expression used to schedule when recommendations are generated. If not supplied then no scheduler is started. Without a scheduler you can still manually invoke recommendation generation by using the [API](#API) | ❌         |
+| LANGUAGE | en | String for the language code to use to generate recommendations from | ❌ |
+| ENFORCE_ORIG_LANGUAGE | false | Whether to only generate recommendations that have an original language matching the LANGUAGE var. | ❌ |
 
 #### Series
 | Name             | Default | Description                                | Required    |

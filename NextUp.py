@@ -162,7 +162,8 @@ def generate_movie_recommendations(user: UserDto, min_watch_percent: float, max_
         return
     
     all_user_movie_ids.extend([series.tmdb_id for series in watched_movies])
-    all_user_movie_ids = list(set(all_user_movie_ids))
+
+    all_user_movie_ids = helpers.to_int_ids(all_user_movie_ids)
 
     movie_recos = []
     for movie in watched_movies:
@@ -196,7 +197,8 @@ def generate_series_recommendations(user: UserDto, max_days_lookback: int, max_r
         return
 
     all_user_series_ids.extend([series.tmdb_id for series in watched_series])
-    all_user_series_ids = list(set(all_user_series_ids))
+
+    all_user_series_ids = helpers.to_int_ids(all_user_series_ids)
 
     series_recos = []
     for series in watched_series:

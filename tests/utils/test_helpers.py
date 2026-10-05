@@ -7,6 +7,7 @@ from utils.helpers import (
     parse_jellyfin_date,
     create_map_by_id,
     safe_call,
+    to_int_ids,
 )
 
 
@@ -113,6 +114,36 @@ class TestCreateMapById(unittest.TestCase):
         result = create_map_by_id(items, 'name')
         self.assertIn('foo', result)
         self.assertIn('bar', result)
+
+
+# ===========================================================================
+# to_int_ids
+# ===========================================================================
+
+class TestToIntIds(unittest.TestCase):
+
+    def test_converts_strings_to_ints(self):
+        self.assertEqual(to_int_ids(['1', '2', '3']), {1, 2, 3})
+
+    def test_mixed_int_and_str_collapse_to_same_value(self):
+        # The core bug: int 63404 and str '63404' must be treated as equal.
+        self.assertEqual(to_int_ids([63404, '63404']), {63404})
+
+    def test_str_member_matches_int_lookup(self):
+        result = to_int_ids([200, 100, '63404'])
+        self.assertIn(63404, result)
+
+    def test_skips_none_values(self):
+        self.assertEqual(to_int_ids([1, None, 2]), {1, 2})
+
+    def test_skips_non_numeric_values(self):
+        self.assertEqual(to_int_ids(['12', 'abc', '34']), {12, 34})
+
+    def test_handles_none_iterable(self):
+        self.assertEqual(to_int_ids(None), set())
+
+    def test_handles_empty_iterable(self):
+        self.assertEqual(to_int_ids([]), set())
 
 
 # ===========================================================================

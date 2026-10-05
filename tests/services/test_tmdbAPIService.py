@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, call
 import os
+import requests
 from services.tmdbAPIService import (
     get_tv_genres,
     get_movie_genres,
@@ -110,6 +111,102 @@ class TestMakeAuthenticatedTMDBApiRequest(TMDBTestBase):
         call_args = mock_make_request.call_args[0]
         self.assertEqual(call_args[2], {'p': 1})
         self.assertEqual(call_args[3], {'b': 2})
+
+
+# ===========================================================================
+# _make_authenticated_tmdb_api_request — rate limiting (HTTP 429) handling
+# ===========================================================================
+
+def _make_429_error(retry_after: str | None = None) -> requests.exceptions.HTTPError:
+    """Build an HTTPError whose response is a 429 with an optional Retry-After."""
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 429
+    response.headers = {} if retry_after is None else {'Retry-After': retry_after}
+    return requests.exceptions.HTTPError(response=response)
+
+
+def _make_http_error(status_code: int) -> requests.exceptions.HTTPError:
+    response = MagicMock(spec=requests.Response)
+    response.status_code = status_code
+    response.headers = {}
+    return requests.exceptions.HTTPError(response=response)
+
+
+class TestMakeAuthenticatedTMDBApiRequestRateLimiting(TMDBTestBase):
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_retries_once_then_succeeds_after_429(self, mock_make_request, mock_sleep):
+        success = MagicMock()
+        mock_make_request.side_effect = [_make_429_error('1'), success]
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            result = _make_authenticated_tmdb_api_request('path')
+        self.assertIs(result, success)
+        self.assertEqual(mock_make_request.call_count, 2)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_honors_retry_after_header(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = [_make_429_error('7'), MagicMock()]
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            _make_authenticated_tmdb_api_request('path')
+        mock_sleep.assert_called_once_with(7.0)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_falls_back_to_backoff_when_header_missing(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = [_make_429_error(None), MagicMock()]
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            _make_authenticated_tmdb_api_request('path')
+        # First attempt (attempt=0) → 2 ** 0 == 1 second.
+        mock_sleep.assert_called_once_with(1)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_falls_back_to_backoff_when_header_unparseable(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = [_make_429_error('not-a-number'), MagicMock()]
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            _make_authenticated_tmdb_api_request('path')
+        mock_sleep.assert_called_once_with(1)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_caps_retry_after_at_max_backoff(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = [_make_429_error('99999'), MagicMock()]
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            _make_authenticated_tmdb_api_request('path')
+        mock_sleep.assert_called_once_with(60)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_gives_up_after_max_retries(self, mock_make_request, mock_sleep):
+        # Always rate limited → should retry _MAX_RETRIES times then re-raise.
+        from services.tmdbAPIService import _MAX_RETRIES
+        mock_make_request.side_effect = _make_429_error('1')
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            with self.assertRaises(requests.exceptions.HTTPError):
+                _make_authenticated_tmdb_api_request('path')
+        self.assertEqual(mock_make_request.call_count, _MAX_RETRIES + 1)
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_non_429_http_error_is_not_retried(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = _make_http_error(500)
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            with self.assertRaises(requests.exceptions.HTTPError):
+                _make_authenticated_tmdb_api_request('path')
+        mock_make_request.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch('services.tmdbAPIService.time.sleep')
+    @patch('services.tmdbAPIService.make_request')
+    def test_http_error_without_response_is_not_retried(self, mock_make_request, mock_sleep):
+        mock_make_request.side_effect = requests.exceptions.HTTPError(response=None)
+        with patch.dict(os.environ, {'TMDB_API_KEY': 'key'}):
+            with self.assertRaises(requests.exceptions.HTTPError):
+                _make_authenticated_tmdb_api_request('path')
+        mock_make_request.assert_called_once()
+        mock_sleep.assert_not_called()
 
 
 # ===========================================================================

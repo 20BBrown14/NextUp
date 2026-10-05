@@ -1,4 +1,5 @@
 import os
+import time
 import threading
 import requests
 from cachetools import TTLCache, LRUCache, cached
@@ -11,6 +12,22 @@ from constants.config import CONFIG_KEYS
 from utils import logger
 
 logger = logger.get_logger(__name__)
+
+_MAX_RETRIES = 5          # retry attempts after the initial request
+_MAX_BACKOFF_SECONDS = 60  # upper bound for any single wait
+
+
+def _retry_after_seconds(response: Optional[requests.Response], attempt: int) -> float:
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return min(float(retry_after), _MAX_BACKOFF_SECONDS)
+            except (TypeError, ValueError):
+                pass
+
+    # Exponential backoff fallback: 1s, 2s, 4s, 8s, ... capped.
+    return min(2 ** attempt, _MAX_BACKOFF_SECONDS)
 
 # ---------------------------------------------------------------------------
 # Cache stores
@@ -50,7 +67,31 @@ def _make_authenticated_tmdb_api_request(
         "Authorization": f"Bearer {TMDB_API_KEY}"
     }
 
-    return make_request(request_url, method, params, body, headers, timeout)
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return make_request(request_url, method, params, body, headers, timeout)
+        except requests.exceptions.HTTPError as e:
+            response = e.response
+            if response is None or response.status_code != 429:
+                raise
+
+            if attempt >= _MAX_RETRIES:
+                logger.error(
+                    f"TMDB rate limit (429) still in effect for {request_url} "
+                    f"after {_MAX_RETRIES} retries. Giving up."
+                )
+                raise
+
+            wait_seconds = _retry_after_seconds(response, attempt)
+            logger.warning(
+                f"TMDB rate limited (429) on {request_url}. "
+                f"Waiting {wait_seconds:.0f}s before retry "
+                f"{attempt + 1}/{_MAX_RETRIES}."
+            )
+            time.sleep(wait_seconds)
+
+    # Unreachable: the loop either returns a response or raises.
+    raise RuntimeError("TMDB request retry loop exited unexpectedly")
 
 
 # --- Genre lists (static reference data, no expiry) ------------------------

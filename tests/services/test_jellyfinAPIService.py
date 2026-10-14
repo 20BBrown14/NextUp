@@ -16,6 +16,23 @@ from services.jellyfinAPIService import (
     get_all_available_movies,
     get_all_available_series,
     delete_item_by_id,
+    get_item_path,
+    get_items_by_tmdb_ids,
+    get_series_episode_paths,
+    get_virtual_folders,
+    get_virtual_folder_by_name,
+    create_library,
+    refresh_libraries,
+    get_user_policy,
+    add_library_to_user,
+    get_collections,
+    get_collection_by_name,
+    get_collection_items,
+    create_collection,
+    add_items_to_collection,
+    remove_items_from_collection,
+    COLLECTION_ITEMS_BATCH_SIZE,
+    DEFAULT_LIBRARY_OPTIONS,
     _make_authenticated_jellyfin_api_request,
     _library_cache,
     _item_meta_cache,
@@ -818,6 +835,389 @@ class TestDeleteItemById(JellyfinTestBase):
     def test_raises_for_invalid_length_id(self, mock_req):
         with self.assertRaises(Exception):
             delete_item_by_id('tooshort')
+
+
+# ===========================================================================
+# get_item_path
+# ===========================================================================
+
+class TestGetItemPath(JellyfinTestBase):
+
+    def test_prefers_media_source_path(self):
+        item = {
+            'Path': '/top/level.mkv',
+            'MediaSources': [{'Path': '/media/source.mkv'}],
+        }
+        self.assertEqual(get_item_path(item), '/media/source.mkv')
+
+    def test_falls_back_to_top_level_path(self):
+        item = {'Path': '/top/level.mkv', 'MediaSources': []}
+        self.assertEqual(get_item_path(item), '/top/level.mkv')
+
+    def test_falls_back_when_media_source_has_no_path(self):
+        item = {'Path': '/top/level.mkv', 'MediaSources': [{'Path': None}]}
+        self.assertEqual(get_item_path(item), '/top/level.mkv')
+
+    def test_returns_none_when_nothing_present(self):
+        self.assertIsNone(get_item_path({}))
+
+    def test_returns_none_for_falsy_item(self):
+        self.assertIsNone(get_item_path(None))
+
+
+# ===========================================================================
+# get_items_by_tmdb_ids
+# ===========================================================================
+
+class TestGetItemsByTmdbIds(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_filters_to_requested_tmdb_ids(self, mock_req):
+        items = [
+            {'Name': 'A', 'ProviderIds': {'Tmdb': '100'}},
+            {'Name': 'B', 'ProviderIds': {'Tmdb': '200'}},
+            {'Name': 'C', 'ProviderIds': {'Tmdb': '300'}},
+        ]
+        mock_req.return_value = _make_mock_response({'Items': items})
+        result = get_items_by_tmdb_ids([100, 300], 'Movie')
+        names = [item['Name'] for item in result]
+        self.assertEqual(names, ['A', 'C'])
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_matches_int_ids_against_string_provider_ids(self, mock_req):
+        items = [{'Name': 'A', 'ProviderIds': {'Tmdb': '100'}}]
+        mock_req.return_value = _make_mock_response({'Items': items})
+        result = get_items_by_tmdb_ids([100], 'Series')
+        self.assertEqual(len(result), 1)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_returns_empty_for_no_ids_without_calling_api(self, mock_req):
+        self.assertEqual(get_items_by_tmdb_ids([], 'Movie'), [])
+        mock_req.assert_not_called()
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_requests_correct_item_type_and_fields(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Items': []})
+        get_items_by_tmdb_ids([1], 'Series')
+        params = mock_req.call_args[1].get('params') or mock_req.call_args[0][2]
+        self.assertEqual(params['IncludeItemTypes'], 'Series')
+        self.assertIn('ProviderIds', params['Fields'])
+        self.assertIn('MediaSources', params['Fields'])
+
+    def test_rejects_invalid_item_type(self):
+        with self.assertRaises(Exception) as ctx:
+            get_items_by_tmdb_ids([1], 'Album')
+        self.assertIn("['Movie', 'Series']", str(ctx.exception))
+
+
+# ===========================================================================
+# get_series_episode_paths
+# ===========================================================================
+
+class TestGetSeriesEpisodePaths(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_returns_season_episode_path_name(self, mock_req):
+        episodes = [
+            {'ParentIndexNumber': 1, 'IndexNumber': 1, 'Path': '/s1e1.mkv', 'Name': 'Pilot'},
+            {'ParentIndexNumber': 1, 'IndexNumber': 2,
+             'MediaSources': [{'Path': '/s1e2.mkv'}], 'Name': 'Ep2'},
+        ]
+        mock_req.return_value = _make_mock_response({'Items': episodes})
+        result = get_series_episode_paths('series-1')
+        self.assertEqual(result[0], {'season': 1, 'episode': 1, 'path': '/s1e1.mkv', 'name': 'Pilot'})
+        self.assertEqual(result[1]['path'], '/s1e2.mkv')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_skips_episodes_without_path(self, mock_req):
+        episodes = [
+            {'ParentIndexNumber': 1, 'IndexNumber': 1, 'Name': 'No path'},
+            {'ParentIndexNumber': 1, 'IndexNumber': 2, 'Path': '/s1e2.mkv', 'Name': 'Has path'},
+        ]
+        mock_req.return_value = _make_mock_response({'Items': episodes})
+        result = get_series_episode_paths('series-1')
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['episode'], 2)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_hits_shows_episodes_endpoint(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Items': []})
+        get_series_episode_paths('series-xyz')
+        url = mock_req.call_args[0][0]
+        self.assertEqual(url, 'Shows/series-xyz/Episodes')
+
+    def test_returns_empty_for_falsy_id(self):
+        self.assertEqual(get_series_episode_paths(''), [])
+
+
+# ===========================================================================
+# Library management
+# ===========================================================================
+
+class TestVirtualFolders(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_get_virtual_folders_returns_json(self, mock_req):
+        folders = [{'Name': 'Movies', 'ItemId': '1'}]
+        mock_req.return_value = _make_mock_response(folders)
+        self.assertEqual(get_virtual_folders(), folders)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_get_virtual_folder_by_name_match(self, mock_req):
+        folders = [{'Name': 'Movies', 'ItemId': '1'}, {'Name': 'Requests (bob)', 'ItemId': '2'}]
+        mock_req.return_value = _make_mock_response(folders)
+        self.assertEqual(get_virtual_folder_by_name('Requests (bob)')['ItemId'], '2')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_get_virtual_folder_by_name_no_match(self, mock_req):
+        mock_req.return_value = _make_mock_response([{'Name': 'Movies', 'ItemId': '1'}])
+        self.assertIsNone(get_virtual_folder_by_name('Requests (nobody)'))
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_create_library_params_and_body(self, mock_req):
+        mock_req.return_value = MagicMock()
+        create_library('Requests (bob)', '/recs/bob/requests')
+        url = mock_req.call_args[0][0]
+        method = mock_req.call_args[1].get('method') or mock_req.call_args[0][1]
+        params = mock_req.call_args[1].get('params')
+        body = mock_req.call_args[1].get('body')
+        self.assertEqual(url, 'Library/VirtualFolders')
+        self.assertEqual(method, 'POST')
+        self.assertEqual(params['name'], 'Requests (bob)')
+        self.assertEqual(params['collectionType'], 'mixed')
+        self.assertEqual(params['paths'], ['/recs/bob/requests'])
+        self.assertEqual(body['LibraryOptions'], DEFAULT_LIBRARY_OPTIONS)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_refresh_libraries_posts(self, mock_req):
+        mock_req.return_value = MagicMock()
+        refresh_libraries()
+        url = mock_req.call_args[0][0]
+        method = mock_req.call_args[1].get('method') or mock_req.call_args[0][1]
+        self.assertEqual(url, 'Library/Refresh')
+        self.assertEqual(method, 'POST')
+
+    def test_default_library_options_values(self):
+        self.assertTrue(DEFAULT_LIBRARY_OPTIONS['EnableRealtimeMonitor'])
+        self.assertFalse(DEFAULT_LIBRARY_OPTIONS['EnableTrickplayImageExtraction'])
+        self.assertFalse(DEFAULT_LIBRARY_OPTIONS['EnableChapterImageExtraction'])
+        self.assertEqual(DEFAULT_LIBRARY_OPTIONS['SubtitleDownloadLanguages'], [])
+
+
+# ===========================================================================
+# add_library_to_user  (policy-merge safety)
+# ===========================================================================
+
+class TestAddLibraryToUser(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_appends_to_existing_enabled_folders(self, mock_req):
+        # First call: GET user (policy). Second call: POST policy.
+        mock_req.side_effect = [
+            _make_mock_response({'Policy': {'EnableAllFolders': False, 'EnabledFolders': ['lib-1']}}),
+            MagicMock(),
+        ]
+        add_library_to_user('user-1', 'lib-2')
+        post_call = mock_req.call_args_list[1]
+        posted_policy = post_call[1].get('body') or post_call[0][3]
+        self.assertEqual(posted_policy['EnabledFolders'], ['lib-1', 'lib-2'])
+        # Must not have touched the all-folders flag.
+        self.assertFalse(posted_policy['EnableAllFolders'])
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_does_nothing_when_enable_all_folders(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Policy': {'EnableAllFolders': True, 'EnabledFolders': []}})
+        add_library_to_user('user-1', 'lib-2')
+        # Only the GET happened; no POST to change policy.
+        self.assertEqual(mock_req.call_count, 1)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_does_nothing_when_already_enabled(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Policy': {'EnableAllFolders': False, 'EnabledFolders': ['lib-2']}})
+        add_library_to_user('user-1', 'lib-2')
+        self.assertEqual(mock_req.call_count, 1)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_handles_missing_enabled_folders_key(self, mock_req):
+        mock_req.side_effect = [
+            _make_mock_response({'Policy': {'EnableAllFolders': False}}),
+            MagicMock(),
+        ]
+        add_library_to_user('user-1', 'lib-2')
+        posted_policy = mock_req.call_args_list[1][1].get('body') or mock_req.call_args_list[1][0][3]
+        self.assertEqual(posted_policy['EnabledFolders'], ['lib-2'])
+
+    def test_raises_when_args_missing(self):
+        with self.assertRaises(Exception):
+            add_library_to_user('', 'lib')
+        with self.assertRaises(Exception):
+            add_library_to_user('user', '')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_posts_to_user_policy_endpoint(self, mock_req):
+        mock_req.side_effect = [
+            _make_mock_response({'Policy': {'EnableAllFolders': False, 'EnabledFolders': []}}),
+            MagicMock(),
+        ]
+        add_library_to_user('user-9', 'lib-x')
+        post_call = mock_req.call_args_list[1]
+        url = post_call[0][0]
+        self.assertEqual(url, 'Users/user-9/Policy')
+
+
+# ===========================================================================
+# Collections
+# ===========================================================================
+
+class TestGetCollections(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_returns_boxset_items(self, mock_req):
+        items = [{'Id': 'c1', 'Name': 'Requests - Alice'}]
+        mock_req.return_value = _make_mock_response({'Items': items})
+        result = get_collections()
+        self.assertEqual(result, items)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_queries_boxset_recursively(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Items': []})
+        get_collections()
+        params = mock_req.call_args.kwargs['params']
+        self.assertEqual(params['IncludeItemTypes'], 'BoxSet')
+        self.assertTrue(params['Recursive'])
+
+
+class TestGetCollectionByName(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService.get_collections')
+    def test_returns_exact_name_match(self, mock_get):
+        mock_get.return_value = [
+            {'Id': 'c1', 'Name': 'Requests - Alice'},
+            {'Id': 'c2', 'Name': 'Requests - Bob'},
+        ]
+        result = get_collection_by_name('Requests - Bob')
+        self.assertEqual(result['Id'], 'c2')
+
+    @patch('services.jellyfinAPIService.get_collections')
+    def test_returns_none_when_absent(self, mock_get):
+        mock_get.return_value = [{'Id': 'c1', 'Name': 'Requests - Alice'}]
+        self.assertIsNone(get_collection_by_name('Requests - Carol'))
+
+
+class TestGetCollectionItems(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_returns_member_items(self, mock_req):
+        items = [{'Id': 'm1'}, {'Id': 'm2'}]
+        mock_req.return_value = _make_mock_response({'Items': items})
+        result = get_collection_items('c1')
+        self.assertEqual(result, items)
+        params = mock_req.call_args.kwargs['params']
+        self.assertEqual(params['ParentId'], 'c1')
+
+    def test_empty_id_returns_empty_without_request(self):
+        self.assertEqual(get_collection_items(''), [])
+
+
+class TestCreateCollection(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_returns_new_id_and_seeds_items(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Id': 'new-c'})
+        result = create_collection('Requests - Alice', ['m1', 'm2'])
+        self.assertEqual(result, 'new-c')
+        args, kwargs = mock_req.call_args
+        self.assertEqual(args[0], 'Collections')
+        self.assertEqual(kwargs['method'], 'POST')
+        self.assertEqual(kwargs['params']['name'], 'Requests - Alice')
+        self.assertEqual(kwargs['params']['ids'], 'm1,m2')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_omits_ids_when_none(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Id': 'new-c'})
+        create_collection('Requests - Alice')
+        self.assertNotIn('ids', mock_req.call_args.kwargs['params'])
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_seed_ids_are_chunked(self, mock_req):
+        mock_req.return_value = _make_mock_response({'Id': 'new-c'})
+        ids = [f'm{i}' for i in range(COLLECTION_ITEMS_BATCH_SIZE + 25)]
+        create_collection('Requests - Alice', ids)
+
+        calls = mock_req.call_args_list
+        # First call creates the collection seeded with the first batch.
+        create_call = calls[0]
+        self.assertEqual(create_call.args[0], 'Collections')
+        self.assertEqual(
+            create_call.kwargs['params']['ids'],
+            ','.join(ids[:COLLECTION_ITEMS_BATCH_SIZE]),
+        )
+        # Remainder is added to the new collection in a follow-up batch.
+        add_call = calls[1]
+        self.assertEqual(add_call.args[0], 'Collections/new-c/Items')
+        self.assertEqual(
+            add_call.kwargs['params']['ids'],
+            ','.join(ids[COLLECTION_ITEMS_BATCH_SIZE:]),
+        )
+        self.assertEqual(len(calls), 2)
+
+
+class TestAddItemsToCollection(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_posts_csv_ids(self, mock_req):
+        mock_req.return_value = MagicMock()
+        add_items_to_collection('c1', ['m1', 'm2'])
+        args, kwargs = mock_req.call_args
+        self.assertEqual(args[0], 'Collections/c1/Items')
+        self.assertEqual(kwargs['method'], 'POST')
+        self.assertEqual(kwargs['params']['ids'], 'm1,m2')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_ids_are_chunked_across_requests(self, mock_req):
+        mock_req.return_value = MagicMock()
+        ids = [f'm{i}' for i in range(COLLECTION_ITEMS_BATCH_SIZE * 2 + 1)]
+        add_items_to_collection('c1', ids)
+
+        self.assertEqual(mock_req.call_count, 3)
+        sent = [c.kwargs['params']['ids'].split(',') for c in mock_req.call_args_list]
+        self.assertEqual([len(batch) for batch in sent], [COLLECTION_ITEMS_BATCH_SIZE, COLLECTION_ITEMS_BATCH_SIZE, 1])
+        # Every id is sent exactly once, in order.
+        self.assertEqual([i for batch in sent for i in batch], ids)
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_empty_list_is_noop(self, mock_req):
+        add_items_to_collection('c1', [])
+        mock_req.assert_not_called()
+
+
+class TestRemoveItemsFromCollection(JellyfinTestBase):
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_deletes_csv_ids(self, mock_req):
+        mock_req.return_value = MagicMock()
+        remove_items_from_collection('c1', ['m1', 'm2'])
+        args, kwargs = mock_req.call_args
+        self.assertEqual(args[0], 'Collections/c1/Items')
+        self.assertEqual(kwargs['method'], 'DELETE')
+        self.assertEqual(kwargs['params']['ids'], 'm1,m2')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_ids_are_chunked_across_requests(self, mock_req):
+        mock_req.return_value = MagicMock()
+        ids = [f'm{i}' for i in range(COLLECTION_ITEMS_BATCH_SIZE + 1)]
+        remove_items_from_collection('c1', ids)
+
+        self.assertEqual(mock_req.call_count, 2)
+        for c in mock_req.call_args_list:
+            self.assertEqual(c.kwargs['method'], 'DELETE')
+        sent = [c.kwargs['params']['ids'].split(',') for c in mock_req.call_args_list]
+        self.assertEqual([len(batch) for batch in sent], [COLLECTION_ITEMS_BATCH_SIZE, 1])
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_empty_list_is_noop(self, mock_req):
+        remove_items_from_collection('c1', [])
+        mock_req.assert_not_called()
 
 
 if __name__ == '__main__':

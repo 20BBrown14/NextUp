@@ -89,6 +89,72 @@ def get_or_create_seerr_user_by_jellyfin_id(jellyfin_user_id: str, auto_create: 
         raise Exception(f"Failed to auto-import Jellyfin user: {jellyfin_user_id}")
     
     raise Exception(f"Jellyfin user '{jellyfin_user_id}' not found in Jellyseerr and auto-creation is disabled.")
-    
-    
 
+def get_requests(
+    requested_by: Optional[int] = None,
+    media_type: str = 'all',
+    filter: Optional[str] = None,
+    page_size: int = 100,
+) -> List[MediaRequest]:
+    """
+    Fetch Jellyseerr media requests, paging through all results.
+
+    When `requested_by` (a Seerr user id) is provided, only that user's requests
+    are returned. `media_type` is one of 'movie', 'tv', or 'all'. `filter` is an
+    optional Seerr status filter (e.g. 'available').
+    """
+    if media_type not in ['movie', 'tv', 'all']:
+        raise Exception(f"media_type must be one of ['movie', 'tv', 'all']. Got {media_type}")
+
+    base_params: Dict[str, Any] = {
+        "take": page_size,
+        "mediaType": media_type,
+    }
+    if requested_by is not None:
+        base_params["requestedBy"] = requested_by
+    if filter is not None:
+        base_params["filter"] = filter
+
+    all_requests: List[MediaRequest] = []
+    skip = 0
+    while True:
+        params = {**base_params, "skip": skip}
+        response = _make_authenticated_seerr_api_request('request', params=params).json()
+
+        results = response.get('results') or []
+        all_requests.extend(results)
+
+        page_info = response.get('pageInfo') or {}
+        total_pages = page_info.get('pages')
+        current_page = page_info.get('page')
+
+        # Stop when we've consumed the last page or the server returned nothing.
+        if not results:
+            break
+        if total_pages is not None and current_page is not None and current_page >= total_pages:
+            break
+        if total_pages is None and len(results) < page_size:
+            break
+
+        skip += page_size
+
+    return all_requests
+
+
+def get_user_by_jellyfin_id(jellyfin_user_id: str) -> Optional[User]:
+    """
+    Look up a Jellyseerr user by their Jellyfin user id.
+
+    Returns None when no matching Seerr user exists (404). Hyphens are stripped
+    for compatibility across Jellyseerr versions, mirroring the import helpers.
+    """
+    if not jellyfin_user_id:
+        return None
+
+    clean_id = jellyfin_user_id.replace("-", "")
+    try:
+        return _make_authenticated_seerr_api_request(f"user/jellyfin/{clean_id}").json()
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", None) == 404:
+            return None
+        raise

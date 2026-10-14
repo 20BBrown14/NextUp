@@ -1,4 +1,5 @@
 ./venv
+.kiro
 .env
 config.env
 *.code-workspace

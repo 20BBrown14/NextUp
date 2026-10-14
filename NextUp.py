@@ -1,7 +1,8 @@
-from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, watchstateAPIService as watchstate_api_service
+from services import jellyfinAPIService as jellyfin_api_service, tmdbAPIService as tmdb_api_service, watchstateAPIService as watchstate_api_service, seerrAPIService as seerr_api_service
 from utils import helpers, filesystem, logger
 from constants.config import CONFIG_KEYS
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
+from constants.seerr import SEERR_SECRET_KEYS
 from adapters import jellyfin as jellyfin_adapter
 import os
 import requests
@@ -278,6 +279,44 @@ def generate_upcoming_movies_recommendations():
     # Write recos to filesystem
     write_recos_to_filesystem(f"{ROOT_RECOMMENDATIONS_DIR_PATH}/upcoming-movies", metadata_json, 'movie')
 
+def generate_request_collection_for_user(user: UserDto):
+    # Map Jellyfin user -> Seerr user. A user with no Jellyseerr identity is skipped.
+    seerr_user = seerr_api_service.get_user_by_jellyfin_id(user.get("Id"))
+    if not seerr_user:
+        logger.info(f"No Jellyseerr identity for Jellyfin user {user.get('Name')}. Skipping request collection.")
+        return
+
+    requests_list = seerr_api_service.get_requests(requested_by=seerr_user.get("id"))
+
+    # A media type is not trusted; TMDB ids are resolved against both the Movie
+    # and Series libraries. Requests whose media is not on the server resolve to
+    # nothing and are thereby skipped.
+    requested_tmdb_ids = helpers.to_int_ids(
+        request.get("media", {}).get("tmdbId") for request in requests_list
+    )
+
+    resolved_items = [
+        *jellyfin_api_service.get_items_by_tmdb_ids(requested_tmdb_ids, "Movie"),
+        *jellyfin_api_service.get_items_by_tmdb_ids(requested_tmdb_ids, "Series"),
+    ]
+    desired_ids = {item.get("Id") for item in resolved_items if item.get("Id")}
+
+    name = f"Requests - {user.get('Name')}"
+    collection = jellyfin_api_service.get_collection_by_name(name)
+
+    if not collection:
+        if not desired_ids:
+            return
+        jellyfin_api_service.create_collection(name, list(desired_ids))
+        return
+
+    collection_id = collection.get("Id")
+    current_ids = {item.get("Id") for item in jellyfin_api_service.get_collection_items(collection_id) if item.get("Id")}
+
+    jellyfin_api_service.add_items_to_collection(collection_id, list(desired_ids - current_ids))
+    jellyfin_api_service.remove_items_from_collection(collection_id, list(current_ids - desired_ids))
+
+
 def log_time():
     logger.info(f"Generating recommendations at {time.strftime('%H:%M:%S')}")
 
@@ -303,6 +342,12 @@ def NextUp():
     MAX_TOTAL_SERIES_RECOMMENDATIONS = os.environ.get(CONFIG_KEYS['MAX_TOTAL_SERIES_RECOMMENDATIONS'])
     INCLUDE_POPULAR_SERIES_RECOMMENDATIONS = os.environ.get(CONFIG_KEYS['INCLUDE_POPULAR_SERIES_RECOMMENDATIONS'], 'true').lower() == 'true'    
 
+    GENERATE_REQUEST_COLLECTIONS = os.environ.get(CONFIG_KEYS['GENERATE_REQUEST_COLLECTIONS'], 'false').lower() == 'true'
+    SEERR_CONFIGURED = bool(os.environ.get(SEERR_SECRET_KEYS['SEERR_URL']) and os.environ.get(SEERR_SECRET_KEYS['SEERR_API_KEY']))
+    if GENERATE_REQUEST_COLLECTIONS and not SEERR_CONFIGURED:
+        logger.info("GENERATE_REQUEST_COLLECTIONS is enabled but Seerr is not configured. Skipping request collections.")
+    should_generate_request_collections = GENERATE_REQUEST_COLLECTIONS and SEERR_CONFIGURED
+
     all_jellyfin_users = jellyfin_api_service.get_users()
     users_to_recommend_for = [user for user in all_jellyfin_users if user["Name"].lower() in filtered_generated_recos_for_list or len(filtered_generated_recos_for_list) == 0]
 
@@ -321,6 +366,9 @@ def NextUp():
             helpers.safe_call(generate_series_recommendations, user, int(MAX_SERIES_DAYS_LOOKBACK), int(MAX_RECOMMENDATIONS_PER_SERIES), int(MIN_EPISODE_WATCH_COUNT), int(MAX_TOTAL_SERIES_RECOMMENDATIONS))
         else:
             helpers.logger.info("Series recommendations are disabled. Skipping.")
+
+        if should_generate_request_collections:
+            helpers.safe_call(generate_request_collection_for_user, user)
 
     if INCLUDE_POPULAR_SERIES_RECOMMENDATIONS:
         helpers.safe_call(generate_popular_series_recommendations)

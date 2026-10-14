@@ -351,3 +351,257 @@ def delete_item_by_id(item_id: str):
         return
     
     return _make_authenticated_jellyfin_api_request(f"Items/{convert_string_to_uuid(item_id)}", method='DELETE')
+
+
+# ===========================================================================
+# Library + item resolution helpers
+#
+# None of these are cached: library and user-policy state must always be read
+# fresh.
+# ===========================================================================
+
+DEFAULT_LIBRARY_OPTIONS: Dict[str, Any] = {
+    "EnableRealtimeMonitor": True,
+    "EnableChapterImageExtraction": False,
+    "ExtractChapterImagesDuringLibraryScan": False,
+    "EnableTrickplayImageExtraction": False,
+    "ExtractTrickplayImagesDuringLibraryScan": False,
+    "SaveTrickplayWithMedia": False,
+    "SubtitleDownloadLanguages": [],
+}
+
+
+def get_item_path(item: BaseItemDto) -> Optional[str]:
+    """Return the on-disk path for an item, preferring its first media source."""
+    if not item:
+        return None
+
+    media_sources = item.get("MediaSources") or []
+    for source in media_sources:
+        source_path = source.get("Path")
+        if source_path:
+            return source_path
+
+    return item.get("Path")
+
+
+def get_items_by_tmdb_ids(tmdb_ids: List[int], item_type: str) -> List[BaseItemDto]:
+    """Return server items of `item_type` ("Movie" or "Series") whose TMDB id is
+    in `tmdb_ids`. Jellyfin can't filter by TMDB id, so filtering is client-side."""
+    if item_type not in ["Movie", "Series"]:
+        raise Exception(f"item_type must be one of ['Movie', 'Series']. Got {item_type}")
+
+    if not tmdb_ids:
+        return []
+
+    wanted = {str(tmdb_id) for tmdb_id in tmdb_ids}
+
+    params = {
+        "Recursive": True,
+        "IncludeItemTypes": item_type,
+        "Fields": "ProviderIds,Path,MediaSources,ProductionYear"
+    }
+
+    raw_items = _make_authenticated_jellyfin_api_request("Items", params=params).json().get("Items", [])
+    items = cast(List[BaseItemDto], raw_items)
+
+    return [
+        item for item in items
+        if item.get("ProviderIds", {}).get("Tmdb") in wanted
+    ]
+
+
+def get_series_episode_paths(series_item_id: str) -> List[Dict[str, Any]]:
+    """Return every episode of a series present on the server as
+    {season, episode, path, name}. Episodes without a resolvable path are skipped."""
+    if not series_item_id:
+        return []
+
+    params = {
+        "Fields": "Path,MediaSources"
+    }
+
+    raw_episodes = _make_authenticated_jellyfin_api_request(
+        f"Shows/{series_item_id}/Episodes", params=params
+    ).json().get("Items", [])
+    episodes = cast(List[BaseItemDto], raw_episodes)
+
+    results: List[Dict[str, Any]] = []
+    for episode in episodes:
+        path = get_item_path(episode)
+        if not path:
+            continue
+        results.append({
+            "season": episode.get("ParentIndexNumber"),
+            "episode": episode.get("IndexNumber"),
+            "path": path,
+            "name": episode.get("Name"),
+        })
+
+    return results
+
+
+def get_virtual_folders() -> List[Dict[str, Any]]:
+    """Return all Jellyfin libraries (virtual folders), including their ItemId."""
+    return _make_authenticated_jellyfin_api_request("Library/VirtualFolders").json()
+
+
+def get_virtual_folder_by_name(name: str) -> Optional[Dict[str, Any]]:
+    """Return the virtual folder with the exact given Name, or None."""
+    for folder in get_virtual_folders():
+        if folder.get("Name") == name:
+            return folder
+    return None
+
+
+def create_library(
+    name: str,
+    path: str,
+    collection_type: str = "mixed",
+    library_options: Dict[str, Any] = None,
+    refresh: bool = True,
+) -> None:
+    """Create a Jellyfin library (virtual folder). Idempotency is the caller's
+    responsibility."""
+    params = {
+        "name": name,
+        "collectionType": collection_type,
+        "paths": [path],
+        "refreshLibrary": refresh,
+    }
+    body = {"LibraryOptions": library_options or DEFAULT_LIBRARY_OPTIONS}
+    _make_authenticated_jellyfin_api_request(
+        "Library/VirtualFolders", method="POST", params=params, body=body
+    )
+
+
+def refresh_libraries() -> None:
+    """Trigger a Jellyfin library scan."""
+    _make_authenticated_jellyfin_api_request("Library/Refresh", method="POST")
+
+
+def get_user_policy(user_id: str) -> Dict[str, Any]:
+    """Return a user's current policy object."""
+    user = _make_authenticated_jellyfin_api_request(f"Users/{user_id}").json()
+    return user.get("Policy") or {}
+
+
+def add_library_to_user(user_id: str, library_item_id: str) -> None:
+    """Grant a single user access to a library by its virtual-folder ItemId,
+    appending to their EnabledFolders."""
+    if not user_id or not library_item_id:
+        raise Exception(
+            f"user_id and library_item_id are required. "
+            f"Got {user_id} and {library_item_id} respectively."
+        )
+
+    policy = get_user_policy(user_id)
+
+    # Leave EnableAllFolders users untouched; downgrading them to an explicit
+    # allow-list would silently shrink their access.
+    if policy.get("EnableAllFolders"):
+        return
+
+    enabled_folders = list(policy.get("EnabledFolders") or [])
+    if library_item_id in enabled_folders:
+        return
+
+    enabled_folders.append(library_item_id)
+    policy["EnabledFolders"] = enabled_folders
+
+    _make_authenticated_jellyfin_api_request(
+        f"Users/{user_id}/Policy", method="POST", body=policy
+    )
+
+
+# ===========================================================================
+# Collections (BoxSets)
+#
+# Used to build per-user "Requests - {user}" collections. Not cached: a
+# collection's membership changes as users request media or media leaves the
+# server, and reads drive a delta sync.
+# ===========================================================================
+
+def get_collections() -> List[BaseItemDto]:
+    """Return every collection (BoxSet) on the server."""
+    params = {
+        "Recursive": True,
+        "IncludeItemTypes": "BoxSet",
+        "Fields": "ProviderIds",
+    }
+    raw_items = _make_authenticated_jellyfin_api_request("Items", params=params).json().get("Items", [])
+    return cast(List[BaseItemDto], raw_items)
+
+
+def get_collection_by_name(name: str) -> Optional[BaseItemDto]:
+    """Return the collection with the exact given Name, or None."""
+    for collection in get_collections():
+        if collection.get("Name") == name:
+            return collection
+    return None
+
+
+def get_collection_items(collection_id: str) -> List[BaseItemDto]:
+    """Return the member items of a collection."""
+    if not collection_id:
+        return []
+
+    params = {
+        "ParentId": collection_id,
+        "Fields": "ProviderIds",
+    }
+    raw_items = _make_authenticated_jellyfin_api_request("Items", params=params).json().get("Items", [])
+    return cast(List[BaseItemDto], raw_items)
+
+
+# Item ids are sent as a comma-delimited query param; a user with many requests
+# can produce a URL that exceeds server/proxy length limits, so ids are chunked.
+COLLECTION_ITEMS_BATCH_SIZE = 20
+
+
+def _chunk(items: List[str], size: int):
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
+def create_collection(name: str, item_ids: List[str] = None) -> str:
+    """Create a collection, optionally seeding it with item ids. Returns the new
+    collection's Id. Seeding is chunked: the first batch seeds the collection and
+    any remainder is added afterwards."""
+    item_ids = item_ids or []
+    first_batch = item_ids[:COLLECTION_ITEMS_BATCH_SIZE]
+
+    params: Dict[str, Any] = {"name": name}
+    if first_batch:
+        params["ids"] = ",".join(first_batch)
+
+    response = _make_authenticated_jellyfin_api_request("Collections", method="POST", params=params).json()
+    collection_id = response.get("Id")
+
+    add_items_to_collection(collection_id, item_ids[COLLECTION_ITEMS_BATCH_SIZE:])
+
+    return collection_id
+
+
+def add_items_to_collection(collection_id: str, item_ids: List[str]) -> None:
+    """Add items to a collection, chunked to keep each request's URL bounded.
+    No-op on an empty list."""
+    if not collection_id or not item_ids:
+        return
+
+    for batch in _chunk(item_ids, COLLECTION_ITEMS_BATCH_SIZE):
+        _make_authenticated_jellyfin_api_request(
+            f"Collections/{collection_id}/Items", method="POST", params={"ids": ",".join(batch)}
+        )
+
+
+def remove_items_from_collection(collection_id: str, item_ids: List[str]) -> None:
+    """Remove items from a collection, chunked to keep each request's URL bounded.
+    No-op on an empty list."""
+    if not collection_id or not item_ids:
+        return
+
+    for batch in _chunk(item_ids, COLLECTION_ITEMS_BATCH_SIZE):
+        _make_authenticated_jellyfin_api_request(
+            f"Collections/{collection_id}/Items", method="DELETE", params={"ids": ",".join(batch)}
+        )

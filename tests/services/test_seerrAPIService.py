@@ -1,11 +1,14 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import os
+import requests
 from services.seerrAPIService import (
     get_seerr_users,
     make_media_request,
     import_jellyfin_user,
     get_or_create_seerr_user_by_jellyfin_id,
+    get_requests,
+    get_user_by_jellyfin_id,
     _make_authenticated_seerr_api_request,
 )
 
@@ -281,6 +284,109 @@ class TestGetOrCreateSeerrUserByJellyfinId(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             get_or_create_seerr_user_by_jellyfin_id('new-user', auto_create=False)
         self.assertIn('auto-creation is disabled', str(ctx.exception))
+
+
+# ===========================================================================
+# get_requests
+# ===========================================================================
+
+def _make_request_obj(req_id: int, tmdb_id: int) -> dict:
+    return {
+        'id': req_id,
+        'status': 2,
+        'media': {'tmdbId': tmdb_id, 'status': 5},
+    }
+
+
+class TestGetRequests(unittest.TestCase):
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_returns_single_page_of_results(self, mock_req):
+        results = [_make_request_obj(1, 100), _make_request_obj(2, 200)]
+        mock_req.return_value = _make_mock_response({
+            'pageInfo': {'page': 1, 'pages': 1},
+            'results': results,
+        })
+        self.assertEqual(get_requests(), results)
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_pages_through_all_results(self, mock_req):
+        page1 = [_make_request_obj(i, i) for i in range(100)]
+        page2 = [_make_request_obj(100, 100)]
+        mock_req.side_effect = [
+            _make_mock_response({'pageInfo': {'page': 1, 'pages': 2}, 'results': page1}),
+            _make_mock_response({'pageInfo': {'page': 2, 'pages': 2}, 'results': page2}),
+        ]
+        result = get_requests(page_size=100)
+        self.assertEqual(len(result), 101)
+        # Second call should have advanced skip to the page size.
+        second_params = mock_req.call_args_list[1][1].get('params') or mock_req.call_args_list[1][0][2]
+        self.assertEqual(second_params['skip'], 100)
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_stops_on_empty_results(self, mock_req):
+        mock_req.return_value = _make_mock_response({'pageInfo': {}, 'results': []})
+        self.assertEqual(get_requests(), [])
+        self.assertEqual(mock_req.call_count, 1)
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_passes_requested_by_and_media_type(self, mock_req):
+        mock_req.return_value = _make_mock_response({'pageInfo': {'page': 1, 'pages': 1}, 'results': []})
+        get_requests(requested_by=42, media_type='movie')
+        params = mock_req.call_args[1].get('params') or mock_req.call_args[0][2]
+        self.assertEqual(params['requestedBy'], 42)
+        self.assertEqual(params['mediaType'], 'movie')
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_rejects_invalid_media_type(self, mock_req):
+        with self.assertRaises(Exception) as ctx:
+            get_requests(media_type='anime')
+        self.assertIn("['movie', 'tv', 'all']", str(ctx.exception))
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_omits_requested_by_when_not_provided(self, mock_req):
+        mock_req.return_value = _make_mock_response({'pageInfo': {'page': 1, 'pages': 1}, 'results': []})
+        get_requests()
+        params = mock_req.call_args[1].get('params') or mock_req.call_args[0][2]
+        self.assertNotIn('requestedBy', params)
+
+
+# ===========================================================================
+# get_user_by_jellyfin_id
+# ===========================================================================
+
+class TestGetUserByJellyfinId(unittest.TestCase):
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_returns_user(self, mock_req):
+        user = _make_user(7, jellyfin_user_id='abc')
+        mock_req.return_value = _make_mock_response(user)
+        self.assertEqual(get_user_by_jellyfin_id('abc'), user)
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_strips_hyphens_in_url(self, mock_req):
+        mock_req.return_value = _make_mock_response(_make_user(1))
+        get_user_by_jellyfin_id('a1b2-c3d4-e5f6')
+        url = mock_req.call_args[0][0]
+        self.assertEqual(url, 'user/jellyfin/a1b2c3d4e5f6')
+
+    def test_returns_none_for_empty_id(self):
+        self.assertIsNone(get_user_by_jellyfin_id(''))
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_returns_none_on_404(self, mock_req):
+        err = requests.exceptions.HTTPError()
+        err.response = MagicMock(status_code=404)
+        mock_req.side_effect = err
+        self.assertIsNone(get_user_by_jellyfin_id('missing'))
+
+    @patch('services.seerrAPIService._make_authenticated_seerr_api_request')
+    def test_reraises_non_404_errors(self, mock_req):
+        err = requests.exceptions.HTTPError()
+        err.response = MagicMock(status_code=500)
+        mock_req.side_effect = err
+        with self.assertRaises(requests.exceptions.HTTPError):
+            get_user_by_jellyfin_id('boom')
 
 
 if __name__ == '__main__':

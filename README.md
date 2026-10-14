@@ -19,6 +19,7 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 - [Configuration](#configuration)
   - [Jellyfin](#jellyfin)
   - [Seerr](#seerr)
+  - [Request Collections](#request-collections)
   - [TMDB](#tmdb)
   - [NextUp](#nextup-1)
   - [WatchState](#watchstate)
@@ -35,9 +36,9 @@ NextUp is also compatible with [WatchState](https://github.com/arabcoders/watchs
 - Support for any number of users
 - Can create popular movies, popular series, and upcoming movie recommendations
 - CRON expression supported for flexible scheduling
-- Optional WatchState integration for long-lived watch history
-- Optional Seerr integration to generate requests from Jellyfin UI
-
+- WatchState integration for long-lived watch history
+- Seerr integration to generate requests from Jellyfin UI
+- Seerr integration group user requests into collections for browsing in Jellyfin
 ## How it Works
 NextUp looks at a user's movie and series watch history and uses that to query [TMDB](https://www.themoviedb.org/?language=en-US) for recommendations based on that watched piece of media. It then creates a minimal `metadata.json` file and saves it in a directory specific for that user in a place that Jellyfin can import along with a dummy video file. Jellyfin admins then create a library for that user's recommendations and allow then allow that user to see that library. Optionally, NextUp can create popular movies, upcoming movies, and popular series recommendations.
 
@@ -172,6 +173,16 @@ NextUp uses a configuration file, `config.env` to customize NextUp Behavior.
 | ---------------- | ------- | ------------------------------------------ | ----------- |
 | SEERR_API_KEY    |         | API key used to authenticate with Seerr    | ❌         |
 | SEERR_URL        |         | Base Seer URL                              | ❌         |
+
+### Request Collections
+
+NextUp can build each user a Jellyfin collection of the media _they_ requested in Jellyseerr, so users can see what they asked for. For every user in [`GENERATE_RECOS_FOR`](#recommendations), NextUp reads that user's Jellyseerr requests and groups the matching media already on the server into a collection.
+
+| Name             | Default | Description                                | Required    |
+| ---------------- | ------- | ------------------------------------------ | ----------- |
+| GENERATE_REQUEST_COLLECTIONS | false | Create per-user Jellyfin collections from each user's Jellyseerr requests. Requires Seerr to be configured. | ❌ |
+
+> **Note:** Collections are created server-wide, so a `Requests - {user}` collection is visible to anyone who can already see the underlying media; it is not scoped to the requesting user. Only requested media already present on the server is included. Requested shows are added as the whole Series item, and movies as their individual Movie items. Whether the library page shows these items individually or folds them into the collection tile depends on the library's "group items into collections" display setting. If you enable this feature it is recommended to turn off the grouping feature.
 
 ### TMDB
 

@@ -34,6 +34,7 @@ from services.jellyfinAPIService import (
     COLLECTION_ITEMS_BATCH_SIZE,
     DEFAULT_LIBRARY_OPTIONS,
     _make_authenticated_jellyfin_api_request,
+    _select_library_scoping_user,
     _library_cache,
     _item_meta_cache,
     _user_cache,
@@ -682,7 +683,64 @@ class TestGetAllUserMovies(JellyfinTestBase):
 # get_all_available_movies
 # ===========================================================================
 
+class TestSelectLibraryScopingUser(JellyfinTestBase):
+
+    def _user(self, uid, admin=False, disabled=False, max_rating=None):
+        return {"Id": uid, "Policy": {
+            "IsAdministrator": admin, "IsDisabled": disabled, "MaxParentalRating": max_rating,
+        }}
+
+    @patch('services.jellyfinAPIService.get_users')
+    def test_prefers_enabled_uncapped_admin(self, mock_users):
+        mock_users.return_value = [
+            self._user("capped", max_rating=10),
+            self._user("plain-user"),
+            self._user("the-admin", admin=True),
+        ]
+        self.assertEqual(_select_library_scoping_user(), "the-admin")
+
+    @patch('services.jellyfinAPIService.get_users')
+    def test_falls_back_to_any_uncapped_user_when_no_admin(self, mock_users):
+        mock_users.return_value = [
+            self._user("capped", max_rating=7),
+            self._user("open-user"),
+        ]
+        self.assertEqual(_select_library_scoping_user(), "open-user")
+
+    @patch('services.jellyfinAPIService.get_users')
+    def test_skips_disabled_admin(self, mock_users):
+        mock_users.return_value = [
+            self._user("dead-admin", admin=True, disabled=True),
+            self._user("live-user"),
+        ]
+        self.assertEqual(_select_library_scoping_user(), "live-user")
+
+    @patch('services.jellyfinAPIService.get_users')
+    def test_falls_back_to_first_user_when_all_capped(self, mock_users):
+        mock_users.return_value = [
+            self._user("first-capped", max_rating=10),
+            self._user("second-capped", max_rating=7),
+        ]
+        self.assertEqual(_select_library_scoping_user(), "first-capped")
+
+    @patch('services.jellyfinAPIService.get_users', return_value=[])
+    def test_returns_none_when_no_users(self, mock_users):
+        self.assertIsNone(_select_library_scoping_user())
+
+
 class TestGetAllAvailableMovies(JellyfinTestBase):
+
+    def setUp(self):
+        super().setUp()
+        # No-user calls resolve the enumeration identity via get_users(); stub it
+        # so these tests exercise extraction/paging without a real user list.
+        self._users_patch = patch(
+            'services.jellyfinAPIService.get_users', return_value=[{'Id': 'first-user'}]
+        )
+        self._users_patch.start()
+
+    def tearDown(self):
+        self._users_patch.stop()
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_returns_tmdb_ids_as_ints(self, mock_req):
@@ -702,8 +760,20 @@ class TestGetAllAvailableMovies(JellyfinTestBase):
             result = get_all_available_movies()
         self.assertEqual(result, [300])
 
+    @patch('services.jellyfinAPIService.get_users', return_value=[{'Id': 'first-user'}])
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
-    def test_uses_items_endpoint_without_user_id(self, mock_req):
+    def test_falls_back_to_first_user_without_user_id(self, mock_req, mock_users):
+        # The bare /Items endpoint under-reports the library, so a no-user call
+        # must enumerate via the first Jellyfin user instead.
+        mock_req.return_value = _make_mock_response({'Items': []})
+        with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
+            get_all_available_movies()
+        url = mock_req.call_args[0][0]
+        self.assertEqual(url, 'Users/first-user/Items')
+
+    @patch('services.jellyfinAPIService.get_users', return_value=[])
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_uses_items_endpoint_when_no_users_exist(self, mock_req, mock_users):
         mock_req.return_value = _make_mock_response({'Items': []})
         with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
             get_all_available_movies()
@@ -711,12 +781,14 @@ class TestGetAllAvailableMovies(JellyfinTestBase):
         self.assertEqual(url, 'Items')
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
-    def test_uses_user_items_endpoint_with_user_id(self, mock_req):
+    def test_always_enumerates_via_scoping_user(self, mock_req):
+        # Availability is user-agnostic: it always enumerates via the resolved
+        # scoping user (stubbed in setUp as 'first-user'), never a target user.
         mock_req.return_value = _make_mock_response({'Items': []})
         with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
-            get_all_available_movies(user_id='user-99')
+            get_all_available_movies()
         url = mock_req.call_args[0][0]
-        self.assertEqual(url, 'Users/user-99/Items')
+        self.assertEqual(url, 'Users/first-user/Items')
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_queries_each_library_id_separately(self, mock_req):
@@ -739,12 +811,58 @@ class TestGetAllAvailableMovies(JellyfinTestBase):
             get_all_available_movies()
         mock_req.assert_called_once()
 
+    @patch('services.jellyfinAPIService.tmdb_api_service.get_tmdb_id_from_external_id')
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_resolves_imdb_id_when_tmdb_missing(self, mock_req, mock_resolve):
+        # Item carries only an IMDb id; it must be resolved to a TMDB id so it
+        # still lands in the exclusion set.
+        mock_req.return_value = _make_mock_response({
+            'Items': [{'ProviderIds': {'Imdb': 'tt0133093'}}, _make_library_item('200')]
+        })
+        mock_resolve.return_value = 603
+        with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
+            result = get_all_available_movies()
+        self.assertEqual(sorted(result), [200, 603])
+        mock_resolve.assert_called_once_with('Imdb', 'tt0133093', 'movie')
+
+    @patch('services.jellyfinAPIService.tmdb_api_service.get_tmdb_id_from_external_id')
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_prefers_direct_tmdb_id_over_resolution(self, mock_req, mock_resolve):
+        mock_req.return_value = _make_mock_response({
+            'Items': [{'ProviderIds': {'Tmdb': '42', 'Imdb': 'tt1'}}]
+        })
+        with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
+            result = get_all_available_movies()
+        self.assertEqual(result, [42])
+        mock_resolve.assert_not_called()
+
+    @patch('services.jellyfinAPIService.tmdb_api_service.get_tmdb_id_from_external_id')
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_drops_item_when_resolution_fails(self, mock_req, mock_resolve):
+        mock_req.return_value = _make_mock_response({
+            'Items': [{'ProviderIds': {'Imdb': 'tt0000000'}}]
+        })
+        mock_resolve.return_value = None
+        with patch.dict(os.environ, {'MOVIE_LIBRARY_IDS': ''}):
+            result = get_all_available_movies()
+        self.assertEqual(result, [])
+
 
 # ===========================================================================
 # get_all_available_series
 # ===========================================================================
 
 class TestGetAllAvailableSeries(JellyfinTestBase):
+
+    def setUp(self):
+        super().setUp()
+        self._users_patch = patch(
+            'services.jellyfinAPIService.get_users', return_value=[{'Id': 'first-user'}]
+        )
+        self._users_patch.start()
+
+    def tearDown(self):
+        self._users_patch.stop()
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_returns_tmdb_ids_as_ints(self, mock_req):
@@ -764,8 +882,18 @@ class TestGetAllAvailableSeries(JellyfinTestBase):
             result = get_all_available_series()
         self.assertEqual(result, [600])
 
+    @patch('services.jellyfinAPIService.get_users', return_value=[{'Id': 'first-user'}])
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
-    def test_uses_items_endpoint_without_user_id(self, mock_req):
+    def test_falls_back_to_first_user_without_user_id(self, mock_req, mock_users):
+        mock_req.return_value = _make_mock_response({'Items': []})
+        with patch.dict(os.environ, {'SERIES_LIBRARY_IDS': ''}):
+            get_all_available_series()
+        url = mock_req.call_args[0][0]
+        self.assertEqual(url, 'Users/first-user/Items')
+
+    @patch('services.jellyfinAPIService.get_users', return_value=[])
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_uses_items_endpoint_when_no_users_exist(self, mock_req, mock_users):
         mock_req.return_value = _make_mock_response({'Items': []})
         with patch.dict(os.environ, {'SERIES_LIBRARY_IDS': ''}):
             get_all_available_series()
@@ -773,12 +901,12 @@ class TestGetAllAvailableSeries(JellyfinTestBase):
         self.assertEqual(url, 'Items')
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
-    def test_uses_user_items_endpoint_with_user_id(self, mock_req):
+    def test_always_enumerates_via_scoping_user(self, mock_req):
         mock_req.return_value = _make_mock_response({'Items': []})
         with patch.dict(os.environ, {'SERIES_LIBRARY_IDS': ''}):
-            get_all_available_series(user_id='user-77')
+            get_all_available_series()
         url = mock_req.call_args[0][0]
-        self.assertEqual(url, 'Users/user-77/Items')
+        self.assertEqual(url, 'Users/first-user/Items')
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_queries_each_library_id_separately(self, mock_req):
@@ -802,6 +930,19 @@ class TestGetAllAvailableSeries(JellyfinTestBase):
             get_all_available_series()
         params = mock_req.call_args[1].get('params') or mock_req.call_args[0][2]
         self.assertEqual(params['IncludeItemTypes'], 'Series')
+
+    @patch('services.jellyfinAPIService.tmdb_api_service.get_tmdb_id_from_external_id')
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_resolves_tvdb_id_when_tmdb_missing(self, mock_req, mock_resolve):
+        # Common for TV: Jellyfin tags only a TVDB id. It must resolve to TMDB.
+        mock_req.return_value = _make_mock_response({
+            'Items': [{'ProviderIds': {'Tvdb': '121361'}}, _make_library_item('500')]
+        })
+        mock_resolve.return_value = 1399
+        with patch.dict(os.environ, {'SERIES_LIBRARY_IDS': ''}):
+            result = get_all_available_series()
+        self.assertEqual(sorted(result), [500, 1399])
+        mock_resolve.assert_called_once_with('Tvdb', '121361', 'tv')
 
 
 # ===========================================================================

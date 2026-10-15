@@ -16,6 +16,31 @@ logger = logger.get_logger(__name__)
 _MAX_RETRIES = 5          # retry attempts after the initial request
 _MAX_BACKOFF_SECONDS = 60  # upper bound for any single wait
 
+# Proactive client-side cap. TMDB tolerates ~40 req/s; stay under that so a cold
+# run resolving many external ids can't trip server-side rate limiting.
+_MAX_REQUESTS_PER_SECOND = 30
+_throttle_lock = threading.Lock()
+_request_timestamps: List[float] = []
+
+
+def _throttle() -> None:
+    """Block until starting another request keeps us at or below
+    _MAX_REQUESTS_PER_SECOND over the trailing one-second window."""
+    while True:
+        with _throttle_lock:
+            now = time.monotonic()
+            while _request_timestamps and now - _request_timestamps[0] >= 1.0:
+                _request_timestamps.pop(0)
+
+            if len(_request_timestamps) < _MAX_REQUESTS_PER_SECOND:
+                _request_timestamps.append(now)
+                return
+
+            sleep_for = 1.0 - (now - _request_timestamps[0])
+
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
 
 def _retry_after_seconds(response: Optional[requests.Response], attempt: int) -> float:
     if response is not None:
@@ -49,6 +74,10 @@ _genre_cache: LRUCache = LRUCache(maxsize=10)             # no expiry
 _recommendations_cache: TTLCache = TTLCache(maxsize=1000, ttl=7200)   # 2 hours
 _trending_cache: TTLCache = TTLCache(maxsize=50, ttl=43200)           # 12 hours
 
+# External-id -> TMDB-id mappings. An external id is a stable property of the
+# title and effectively never changes, so no expiry; evicts oldest once full.
+_external_id_cache: LRUCache = LRUCache(maxsize=10000)
+
 
 def _make_authenticated_tmdb_api_request(
     url: str,
@@ -69,6 +98,7 @@ def _make_authenticated_tmdb_api_request(
 
     for attempt in range(_MAX_RETRIES + 1):
         try:
+            _throttle()
             return make_request(request_url, method, params, body, headers, timeout)
         except requests.exceptions.HTTPError as e:
             response = e.response
@@ -144,120 +174,105 @@ def get_recommendations_by_id(type: Literal['movie', 'tv'], id: str, pages: int 
 
 
 # --- Trending/popular lists (12-hour TTL) ----------------------------------
-#
-# Note: excluded_tmdb_ids is intentionally excluded from the cache key.
-# The full list is cached; filtering against the caller's exclusion list
-# is cheap and done in NextUp.py anyway.
 
-@cached(cache=_trending_cache, key=lambda excluded_tmdb_ids=None: hashkey('popular_series'), lock=_cache_lock)
-def get_popular_series(excluded_tmdb_ids: List[str] | None = None) -> List[TMDBSeriesRecommendation]:
+@cached(
+    cache=_trending_cache,
+    key=lambda endpoint, page: hashkey('trending_page', endpoint, page),
+    lock=_cache_lock
+)
+def _fetch_trending_page(endpoint: str, page: int) -> List[Dict[str, Any]]:
+    """Fetch and cache a single page of a trending endpoint
+    ("tv/popular" | "movie/popular" | "movie/upcoming"). Returns [] on API
+    failure or past the last page."""
+    LANGUAGE = os.environ.get(CONFIG_KEYS["LANGUAGE"], 'en-US')
+
+    recos_response = _make_authenticated_tmdb_api_request(
+        endpoint, params={"language": LANGUAGE, "page": page}
+    ).json()
+    recos = recos_response.get('results')
+    if not recos:
+        logger.error(f'Failed to fetch {endpoint} page {page} from TMDB: {recos_response}')
+        return []
+
+    return recos
+
+
+def _collect_trending(endpoint: str, count: int, excluded_tmdb_ids: List[int] | None) -> List[Dict[str, Any]]:
+    """Page through `endpoint`, applying language and exclusion filters, until
+    `count` items survive or the source runs out."""
     LANGUAGE = os.environ.get(CONFIG_KEYS["LANGUAGE"], 'en-US')
     ENFORCE_ORIG_LANGUAGE = os.environ.get(CONFIG_KEYS["ENFORCE_ORIG_LANGUAGE"], 'false').lower() == 'true'
     orig_language_code = LANGUAGE.split('-')[0]
+    excluded = set(excluded_tmdb_ids) if excluded_tmdb_ids else set()
 
-    # PER_PAGE = 20 # Determined by counting api response
-    current_page = 1
+    collected: List[Dict[str, Any]] = []
+    page = 1
+    while len(collected) < count:
+        recos = _fetch_trending_page(endpoint, page)
+        if not recos:
+            logger.info(f'No more results for {endpoint}. Stopping with {len(collected)} recommendations.')
+            break
+
+        if ENFORCE_ORIG_LANGUAGE:
+            recos = [reco for reco in recos if reco.get('original_language') == orig_language_code]
+
+        if excluded:
+            recos = [reco for reco in recos if reco.get('id') not in excluded]
+
+        collected.extend(recos)
+        page += 1
+
+    return collected[:count]
+
+
+def get_popular_series(excluded_tmdb_ids: List[int] | None = None) -> List[TMDBSeriesRecommendation]:
     POPULAR_SERIES_COUNT = int(os.environ.get(CONFIG_KEYS["POPULAR_SERIES_COUNT"], 100))
-    filtered_recos = []
-    while len(filtered_recos) < POPULAR_SERIES_COUNT:
-        params = {
-            "language": LANGUAGE,
-            "page": current_page
-        }
-        recos_response = _make_authenticated_tmdb_api_request(f"tv/popular", params=params).json()
-        recos = recos_response.get('results')
-        if not recos:
-            logger.error(f'Failed to fetch popular series due to TMDB API Failure: {recos_response}')
-            logger.info(f'Continuing with popular series generation with only {len(filtered_recos)} recommendations.')
-            break
+    return cast(List[TMDBSeriesRecommendation], _collect_trending("tv/popular", POPULAR_SERIES_COUNT, excluded_tmdb_ids))
 
-        if not len(recos):
-            logger.info(f'Cannot find anymore popular series. Stopping with {len(recos)} popular recommendations')
-            break
 
-        if ENFORCE_ORIG_LANGUAGE:
-            recos = [reco for reco in recos if reco.get('original_language') == orig_language_code]
-
-        if excluded_tmdb_ids and len(excluded_tmdb_ids):
-            filtered_recos.extend([reco for reco in recos if reco.get('id') not in excluded_tmdb_ids])
-        else:
-            filtered_recos.extend(recos)
-
-        current_page = current_page + 1
-    
-    return filtered_recos[:POPULAR_SERIES_COUNT]
-
-@cached(cache=_trending_cache, key=lambda excluded_tmdb_ids=None: hashkey('popular_movies'), lock=_cache_lock)
-def get_popular_movies(excluded_tmdb_ids: List[str] | None = None) -> List[TMDBMovieRecommendation]:
-    LANGUAGE = os.environ.get(CONFIG_KEYS["LANGUAGE"], 'en-US')
-    ENFORCE_ORIG_LANGUAGE = os.environ.get(CONFIG_KEYS["ENFORCE_ORIG_LANGUAGE"], 'false').lower() == 'true'
-    orig_language_code = LANGUAGE.split('-')[0]
-
-    # PER_PAGE = 20 # Determined by counting api response
-    current_page = 1
+def get_popular_movies(excluded_tmdb_ids: List[int] | None = None) -> List[TMDBMovieRecommendation]:
     POPULAR_MOVIES_COUNT = int(os.environ.get(CONFIG_KEYS["POPULAR_MOVIES_COUNT"], 50))
-    filtered_recos = []
-    while len(filtered_recos) < POPULAR_MOVIES_COUNT:
-        params = {
-            "language": LANGUAGE,
-            "page": current_page
-        }
-        recos_response = _make_authenticated_tmdb_api_request(f"movie/popular", params=params).json()
-        recos = recos_response.get('results')
-        if not recos:
-            logger.error(f'Failed to fetch popular movies due to TMDB API Failure: {recos_response}')
-            logger.info(f'Continuing with popular movies generation with only {len(filtered_recos)} recommendations.')
-            break
+    return cast(List[TMDBMovieRecommendation], _collect_trending("movie/popular", POPULAR_MOVIES_COUNT, excluded_tmdb_ids))
 
-        if not len(recos):
-            logger.info(f'Cannot find anymore popular movies. Stopping with {len(recos)} popular recommendations')
-            break
 
-        if ENFORCE_ORIG_LANGUAGE:
-            recos = [reco for reco in recos if reco.get('original_language') == orig_language_code]
-
-        if excluded_tmdb_ids and len(excluded_tmdb_ids):
-            filtered_recos.extend([reco for reco in recos if reco.get('id') not in excluded_tmdb_ids])
-        else:
-            filtered_recos.extend(recos)
-
-        current_page = current_page + 1
-    
-    return filtered_recos[:POPULAR_MOVIES_COUNT]
-
-@cached(cache=_trending_cache, key=lambda excluded_tmdb_ids=None: hashkey('upcoming_movies'), lock=_cache_lock)
-def get_upcoming_movies(excluded_tmdb_ids: List[str] | None = None) -> List[TMDBMovieRecommendation]:
-    LANGUAGE = os.environ.get(CONFIG_KEYS["LANGUAGE"], 'en-US')
-    ENFORCE_ORIG_LANGUAGE = os.environ.get(CONFIG_KEYS["ENFORCE_ORIG_LANGUAGE"], 'false').lower() == 'true'
-    orig_language_code = LANGUAGE.split('-')[0]
-
-    # PER_PAGE = 20 # Determined by counting api response
-    current_page = 1
+def get_upcoming_movies(excluded_tmdb_ids: List[int] | None = None) -> List[TMDBMovieRecommendation]:
     UPCOMING_MOVIES_COUNT = int(os.environ.get(CONFIG_KEYS["UPCOMING_MOVIES_COUNT"], 50))
-    filtered_recos = []
-    while len(filtered_recos) < UPCOMING_MOVIES_COUNT:
-        params = {
-            "language": LANGUAGE,
-            "page": current_page
-        }
-        recos_response = _make_authenticated_tmdb_api_request(f"movie/upcoming", params=params).json()
-        recos = recos_response.get('results')
-        if not recos:
-            logger.error(f'Failed to fetch upcoming movies due to TMDB API Failure: {recos_response}')
-            logger.info(f'Continuing with upcoming movies generation with only {len(filtered_recos)} recommendations.')
-            break
-        if not len(recos):
-            logger.info(f'Cannot find anymore upcoming movies. Stopping with {len(recos)} upcoming recommendations')
-            break
+    return cast(List[TMDBMovieRecommendation], _collect_trending("movie/upcoming", UPCOMING_MOVIES_COUNT, excluded_tmdb_ids))
 
-        if ENFORCE_ORIG_LANGUAGE:
-            recos = [reco for reco in recos if reco.get('original_language') == orig_language_code]
 
-        if excluded_tmdb_ids and len(excluded_tmdb_ids):
-            filtered_recos.extend([reco for reco in recos if reco.get('id') not in excluded_tmdb_ids])
-        else:
-            filtered_recos.extend(recos)
+# --- External id resolution (no expiry) ------------------------------------
 
-        current_page = current_page + 1
-    
-    return filtered_recos[:UPCOMING_MOVIES_COUNT]
+# Jellyfin provider-id key -> TMDB external_source value.
+_EXTERNAL_SOURCE_BY_PROVIDER = {
+    "Imdb": "imdb_id",
+    "Tvdb": "tvdb_id",
+}
+
+# TMDB media type -> the results key it lands in on the /find response.
+_FIND_RESULTS_KEY = {
+    "movie": "movie_results",
+    "tv": "tv_results",
+}
+
+
+@cached(
+    cache=_external_id_cache,
+    key=lambda provider, external_id, media_type: hashkey('external_id', provider, external_id, media_type),
+    lock=_cache_lock
+)
+def get_tmdb_id_from_external_id(provider: str, external_id: str, media_type: Literal['movie', 'tv']) -> Optional[int]:
+    """Resolve a non-TMDB provider id (IMDb/TVDB) to a TMDB id via TMDB's /find
+    endpoint. Returns None when the provider is unsupported or nothing matches."""
+    external_source = _EXTERNAL_SOURCE_BY_PROVIDER.get(provider)
+    results_key = _FIND_RESULTS_KEY.get(media_type)
+    if not external_source or not results_key or not external_id:
+        return None
+
+    params = {"external_source": external_source}
+    response = _make_authenticated_tmdb_api_request(f"find/{external_id}", params=params).json()
+    results = response.get(results_key) or []
+    if not results:
+        return None
+
+    found_id = results[0].get("id")
+    return int(found_id) if found_id is not None else None

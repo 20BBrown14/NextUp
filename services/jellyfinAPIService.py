@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, List, cast, NamedTuple
 from datetime import date, timedelta
 from constants.config import CONFIG_KEYS
 from collections import Counter
+import services.tmdbAPIService as tmdb_api_service
 
 class Series(NamedTuple):
         name: str
@@ -275,12 +276,74 @@ def get_all_user_movies(user_id: str, max_days: int = None, min_progress_percent
 
 # --- Library availability (stable, 2-hour TTL) ------------------------------
 
+# Provider-id keys tried, in order, when an item has no direct Tmdb id. Each is
+# resolved to a TMDB id via TMDB's /find endpoint.
+_TMDB_FALLBACK_PROVIDERS = ("Imdb", "Tvdb")
+
+
+def _extract_tmdb_ids(items: List[BaseItemDto], media_type: str) -> List[int]:
+    """Map library items to TMDB ids. Items with a Tmdb provider id use it
+    directly; otherwise their Imdb/Tvdb id is resolved to a TMDB id so items that
+    Jellyfin only tagged with a non-TMDB agent still land in the exclusion set."""
+    tmdb_ids: List[int] = []
+    for item in items:
+        provider_ids = item.get("ProviderIds", {}) or {}
+
+        direct = provider_ids.get("Tmdb")
+        if direct is not None:
+            tmdb_ids.append(int(direct))
+            continue
+
+        for provider in _TMDB_FALLBACK_PROVIDERS:
+            external_id = provider_ids.get(provider)
+            if not external_id:
+                continue
+            resolved = tmdb_api_service.get_tmdb_id_from_external_id(provider, external_id, media_type)
+            if resolved is not None:
+                tmdb_ids.append(resolved)
+                break
+
+    return tmdb_ids
+
+
+def _select_library_scoping_user() -> Optional[str]:
+    """Pick a user whose library view is complete, for building the "already
+    owned" exclusion set. A parental-rating cap hides titles from a user's view,
+    so we need an unrestricted user"""
+    users = get_users()
+    if not users:
+        return None
+
+    def policy(u):
+        return u.get("Policy") or {}
+
+    def enabled(u):
+        return not policy(u).get("IsDisabled", False)
+
+    def uncapped(u):
+        return policy(u).get("MaxParentalRating") is None
+
+    for u in users:
+        if enabled(u) and uncapped(u) and policy(u).get("IsAdministrator"):
+            return u.get("Id")
+    for u in users:
+        if enabled(u) and uncapped(u):
+            return u.get("Id")
+
+    return users[0].get("Id")
+
+
+def _available_items_url() -> str:
+    user_id = _select_library_scoping_user()
+    return f"Users/{user_id}/Items" if user_id else "Items"
+
+
 @cached(
     cache=_library_cache,
-    key=lambda user_id=None: hashkey('available_movies', user_id),
+    key=lambda: hashkey('available_movies'),
     lock=_cache_lock
 )
-def get_all_available_movies(user_id: str = None) -> List[str]:
+def get_all_available_movies() -> List[int]:
     RAW_MOVIE_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["MOVIE_LIBRARY_IDS"])
     MOVIE_LIBRARY_IDS = RAW_MOVIE_LIBRARY_IDS.rsplit(',') if RAW_MOVIE_LIBRARY_IDS else []
 
@@ -290,11 +353,7 @@ def get_all_available_movies(user_id: str = None) -> List[str]:
         "Fields": "ProviderIds,ParentId"
     }
 
-    url = ''
-    if user_id == None:
-        url = 'Items'
-    else:
-        url = f"Users/{user_id}/Items"
+    url = _available_items_url()
 
     raw_movie_list = []
     if len(MOVIE_LIBRARY_IDS):
@@ -307,15 +366,14 @@ def get_all_available_movies(user_id: str = None) -> List[str]:
         raw_movie_list.extend(response) 
     
     movie_list = cast(List[BaseItemDto], raw_movie_list)
-    movie_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in movie_list]
-    return [int(id) for id in movie_tmdb_id_list if id is not None]
+    return _extract_tmdb_ids(movie_list, "movie")
 
 @cached(
     cache=_library_cache,
-    key=lambda user_id=None: hashkey('available_series', user_id),
+    key=lambda: hashkey('available_series'),
     lock=_cache_lock
 )
-def get_all_available_series(user_id: str = None) -> List[int]:
+def get_all_available_series() -> List[int]:
     RAW_SERIES_LIBRARY_IDS = os.environ.get(CONFIG_KEYS["SERIES_LIBRARY_IDS"])
     SERIES_LIBRARY_IDS = RAW_SERIES_LIBRARY_IDS.rsplit(',') if RAW_SERIES_LIBRARY_IDS else []
 
@@ -325,11 +383,7 @@ def get_all_available_series(user_id: str = None) -> List[int]:
         "Fields": "ProviderIds"
     }
 
-    url = ''
-    if user_id == None:
-        url = 'Items'
-    else:
-        url = f"Users/{user_id}/Items"
+    url = _available_items_url()
 
     raw_series_list = []
     if len(SERIES_LIBRARY_IDS):
@@ -343,8 +397,7 @@ def get_all_available_series(user_id: str = None) -> List[int]:
 
     
     series_list = cast(List[BaseItemDto], raw_series_list)
-    series_tmdb_id_list = [movie.get("ProviderIds", {}).get("Tmdb") for movie in series_list]
-    return [int(id) for id in series_tmdb_id_list if id is not None]
+    return _extract_tmdb_ids(series_list, "tv")
 
 
 def delete_item_by_id(item_id: str):

@@ -153,7 +153,7 @@ def weight_movie_recos_by_watched_genres(watched_movies: List[jellyfin_api_servi
 def generate_movie_recommendations(user: UserDto, min_watch_percent: float, max_days_lookback: int, max_recos: int, max_total_recos: int):
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
-    all_user_movie_ids = jellyfin_api_service.get_all_available_movies(helpers.convert_string_to_uuid(user.get("Id")))
+    all_user_movie_ids = jellyfin_api_service.get_all_available_movies()
 
     watched_movies = None
     try:
@@ -203,7 +203,7 @@ def generate_movie_recommendations(user: UserDto, min_watch_percent: float, max_
 def generate_series_recommendations(user: UserDto, max_days_lookback: int, max_recos: int, min_episode_watch_count: int, max_total_recos: int):
     global ROOT_RECOMMENDATIONS_DIR_PATH
     
-    all_user_series_ids = jellyfin_api_service.get_all_available_series(helpers.convert_string_to_uuid(user.get("Id")))
+    all_user_series_ids = jellyfin_api_service.get_all_available_series()
     
     watched_series = get_all_user_watched_series(user, max_days_lookback, min_episode_watch_count)
     if watched_series == None:

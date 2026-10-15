@@ -9,10 +9,12 @@ from services.tmdbAPIService import (
     get_popular_series,
     get_popular_movies,
     get_upcoming_movies,
+    get_tmdb_id_from_external_id,
     _make_authenticated_tmdb_api_request,
     _genre_cache,
     _recommendations_cache,
     _trending_cache,
+    _external_id_cache,
 )
 from constants.tmdb import TMDB_SECRET_KEYS
 from constants.config import CONFIG_KEYS
@@ -53,6 +55,7 @@ class TMDBTestBase(unittest.TestCase):
         _genre_cache.clear()
         _recommendations_cache.clear()
         _trending_cache.clear()
+        _external_id_cache.clear()
 
 
 # ===========================================================================
@@ -699,6 +702,119 @@ class TestGetUpcomingMovies(TMDBTestBase):
         with patch.dict(os.environ, {'UPCOMING_MOVIES_COUNT': '5'}):
             result = get_upcoming_movies()
         self.assertEqual(len(result), 5)
+
+
+# ===========================================================================
+# get_tmdb_id_from_external_id
+# ===========================================================================
+
+class TestGetTmdbIdFromExternalId(TMDBTestBase):
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_resolves_imdb_id_for_movie(self, mock_req):
+        mock_req.return_value = _make_mock_response({'movie_results': [{'id': 603}], 'tv_results': []})
+        result = get_tmdb_id_from_external_id('Imdb', 'tt0133093', 'movie')
+        self.assertEqual(result, 603)
+        url = mock_req.call_args[0][0]
+        params = mock_req.call_args[1].get('params')
+        self.assertEqual(url, 'find/tt0133093')
+        self.assertEqual(params, {'external_source': 'imdb_id'})
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_resolves_tvdb_id_for_series(self, mock_req):
+        mock_req.return_value = _make_mock_response({'movie_results': [], 'tv_results': [{'id': 1399}]})
+        result = get_tmdb_id_from_external_id('Tvdb', '121361', 'tv')
+        self.assertEqual(result, 1399)
+        self.assertEqual(mock_req.call_args[1]['params'], {'external_source': 'tvdb_id'})
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_returns_none_when_no_match(self, mock_req):
+        mock_req.return_value = _make_mock_response({'movie_results': [], 'tv_results': []})
+        self.assertIsNone(get_tmdb_id_from_external_id('Imdb', 'tt0000000', 'movie'))
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_returns_none_for_unsupported_provider_without_calling_api(self, mock_req):
+        self.assertIsNone(get_tmdb_id_from_external_id('Zap2It', 'EP123', 'movie'))
+        mock_req.assert_not_called()
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_result_is_cached_on_second_call(self, mock_req):
+        mock_req.return_value = _make_mock_response({'movie_results': [{'id': 11}], 'tv_results': []})
+        get_tmdb_id_from_external_id('Imdb', 'tt1', 'movie')
+        get_tmdb_id_from_external_id('Imdb', 'tt1', 'movie')
+        mock_req.assert_called_once()
+
+
+# ===========================================================================
+# Trending exclusion is not frozen into the cache
+#
+# Regression for the bug where excluded_tmdb_ids was filtered inside the cached
+# body, so the first caller's exclusion list was baked into the cached result.
+# The cached fetch must be exclusion-independent; exclusion applies per call.
+# ===========================================================================
+
+class TestTrendingExclusionNotCached(TMDBTestBase):
+
+    def _page_response(self, items):
+        return _make_mock_response({'results': items})
+
+    def _paged(self, mock_req, pages):
+        """Make mock_req return a distinct page per call, then empty once pages
+        run out (mirrors TMDB returning no results past the last page)."""
+        responses = [self._page_response(p) for p in pages]
+        responses.append(self._page_response([]))
+        mock_req.side_effect = responses
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_popular_series_exclusion_applied_per_call(self, mock_req):
+        # Two distinct pages available; exclusion must reflect the per-call list,
+        # not whatever list first populated the cache.
+        self._paged(mock_req, [
+            [_make_reco(id=i) for i in range(1, 6)],
+            [_make_reco(id=i) for i in range(6, 11)],
+        ])
+        with patch.dict(os.environ, {'POPULAR_SERIES_COUNT': '5'}):
+            first = get_popular_series()                      # populates page cache, no exclusion
+            second = get_popular_series(excluded_tmdb_ids=[2, 4])
+
+        self.assertEqual([r['id'] for r in first], [1, 2, 3, 4, 5])
+        # 2 and 4 excluded; the function backfills from the cached page 2 to COUNT.
+        self.assertEqual([r['id'] for r in second], [1, 3, 5, 6, 7])
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_pages_are_cached_across_calls(self, mock_req):
+        # Page 1 alone satisfies COUNT, so only one page is ever fetched and the
+        # second call reuses the cached page.
+        self._paged(mock_req, [[_make_reco(id=i) for i in range(1, 6)]])
+        with patch.dict(os.environ, {'POPULAR_MOVIES_COUNT': '5'}):
+            get_popular_movies()
+            get_popular_movies()
+        self.assertEqual(mock_req.call_count, 1)
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_exclusion_fills_to_count_when_more_available(self, mock_req):
+        # COUNT=5 with 3 excluded from page 1 must pull from page 2 to still
+        # return 5 items.
+        self._paged(mock_req, [
+            [_make_reco(id=i) for i in range(1, 6)],
+            [_make_reco(id=i) for i in range(6, 11)],
+        ])
+        with patch.dict(os.environ, {'UPCOMING_MOVIES_COUNT': '5'}):
+            result = get_upcoming_movies(excluded_tmdb_ids=[1, 2, 3])
+
+        ids = [r['id'] for r in result]
+        self.assertEqual(len(ids), 5)
+        self.assertEqual(ids, [4, 5, 6, 7, 8])
+
+    @patch('services.tmdbAPIService._make_authenticated_tmdb_api_request')
+    def test_returns_fewer_than_count_only_when_source_exhausted(self, mock_req):
+        # Only one page exists; exclusion thins it and there's nothing to
+        # backfill from, so we return what's left rather than loop forever.
+        self._paged(mock_req, [[_make_reco(id=i) for i in range(1, 6)]])
+        with patch.dict(os.environ, {'UPCOMING_MOVIES_COUNT': '5'}):
+            result = get_upcoming_movies(excluded_tmdb_ids=[2, 4])
+
+        self.assertEqual([r['id'] for r in result], [1, 3, 5])
 
 
 if __name__ == '__main__':

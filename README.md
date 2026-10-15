@@ -128,8 +128,9 @@ Now run `docker compose up --build -d`
 
 #### Libraries
 After NextUp has ran for the first time you should see some new directories in your `/recommendations` directory depending on your settings. The directories with usernames are that user's personalized recommendations and `popular-series`, `popular-movies`, and `upcoming-movies` are just as they seem.
+For automatic library creation and user association you can enable the `AUTO_CREATE_RECOMMENDATION_LIBRARIES` config option. 
 
-You should add new libraries in Jellyfin that utilize these directories. Personally I name them `Discover - Shows (username)` (or movies) and then give only that user access to see that library.
+Otherwise, you should add new libraries in Jellyfin that utilize these directories. Personally I name them `Discover - Shows (username)` (or movies) and then give only that user access to see that library.
 
 Users can then browse the libraries and "mark as watched" media they already watched or "favorite" media to automatically request it in Seerr if that integration is enabled.
 
@@ -218,6 +219,9 @@ For example, if the Jellyfin admin account username is "Fry" that is linked to t
 | RECOMMENDATIONS_CRON_SCHEDULE |         | Cron expression used to schedule when recommendations are generated. If not supplied then no scheduler is started. Without a scheduler you can still manually invoke recommendation generation by using the [API](#API) | ❌         |
 | LANGUAGE | en | String for the language code to use to generate recommendations from | ❌ |
 | ENFORCE_ORIG_LANGUAGE | false | Whether to only generate recommendations that have an original language matching the LANGUAGE var. | ❌ |
+| AUTO_CREATE_RECOMMENDATION_LIBRARIES | false | Auto-create Jellyfin libraries for the recommendation folders and assign them to the right users. Each recommended user gets a `Discover - Movies ([username])` and `Discover - Shows ([username])` library pointing at their own recos. The shared `Popular Movies`, `Upcoming Movies`, and `Popular Shows` libraries (when the corresponding `INCLUDE_*` options are enabled) are created once and made visible to every user in [`GENERATE_RECOS_FOR`](#recommendations). | ❌ |
+
+> **Note:** Jellyfin libraries are server-wide; assignment only controls which users can _see_ a library, it does not make the content private. Users with `EnableAllFolders` are left untouched. New libraries are scanned on creation.
 
 #### Series
 | Name             | Default | Description                                | Required    |

@@ -2,6 +2,8 @@
 .kiro
 .env
 config.env
+config.test.env
+test/jellyfin/data
 *.code-workspace
 **/*__pycache__
 .vscode

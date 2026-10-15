@@ -1,6 +1,7 @@
 import requests
 import os
 import threading
+import requests
 from cachetools import TTLCache, LRUCache, cached
 from cachetools.keys import hashkey
 from constants.jellyfin import JELLYFIN_SECRET_KEYS
@@ -467,17 +468,48 @@ def create_library(
         "name": name,
         "collectionType": collection_type,
         "paths": [path],
-        "refreshLibrary": refresh,
+        # requests serialises Python's True as "True"; Jellyfin's boolean query
+        # parsing expects lowercase.
+        "refreshLibrary": "true" if refresh else "false",
     }
+
+    # Jellyfin's AddVirtualFolder controller overwrites LibraryOptions.PathInfos
+    # from the `paths` query param whenever it is supplied, so the path only needs
+    # to be sent once (the query param). The body carries the remaining options.
     body = {"LibraryOptions": library_options or DEFAULT_LIBRARY_OPTIONS}
-    _make_authenticated_jellyfin_api_request(
-        "Library/VirtualFolders", method="POST", params=params, body=body
-    )
+
+    try:
+        _make_authenticated_jellyfin_api_request(
+            "Library/VirtualFolders", method="POST", params=params, body=body
+        )
+    except requests.exceptions.HTTPError as e:
+        # Jellyfin returns a 400 when `path` does not resolve to an existing
+        # directory on its own filesystem (common when the recommendations
+        # volume is mounted into NextUp but not into the Jellyfin server at the
+        # same path). Surface the server's response and the offending path so the
+        # failure is diagnosable rather than a bare status code.
+        detail = getattr(e.response, "text", "")
+        raise Exception(
+            f"Failed to create Jellyfin library '{name}' for path '{path}'. "
+            f"Jellyfin must be able to see this path on its own filesystem. "
+            f"Server response: {detail}"
+        ) from e
 
 
 def refresh_libraries() -> None:
     """Trigger a Jellyfin library scan."""
     _make_authenticated_jellyfin_api_request("Library/Refresh", method="POST")
+
+
+def refresh_library_item(item_id: str) -> None:
+    """Rescan a single library (or item) by ItemId. """
+    if not item_id:
+        return
+    _make_authenticated_jellyfin_api_request(
+        f"Items/{item_id}/Refresh",
+        method="POST",
+        params={"metadataRefreshMode": "Default", "imageRefreshMode": "Default"},
+    )
 
 
 def get_user_policy(user_id: str) -> Dict[str, Any]:

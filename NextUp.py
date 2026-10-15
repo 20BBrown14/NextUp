@@ -317,6 +317,70 @@ def generate_request_collection_for_user(user: UserDto):
     jellyfin_api_service.remove_items_from_collection(collection_id, list(current_ids - desired_ids))
 
 
+def _ensure_library(name: str, path: str, collection_type: str) -> str:
+    """Create the library if missing, otherwise rescan the existing one so new
+    recommendations are picked up. Returns the library's ItemId (or None if it
+    could not be resolved)."""
+    existing = jellyfin_api_service.get_virtual_folder_by_name(name)
+    if existing:
+        item_id = existing.get("ItemId")
+        jellyfin_api_service.refresh_library_item(item_id)
+        return item_id
+
+    jellyfin_api_service.create_library(name, path, collection_type=collection_type)
+
+    # ItemId is only known after creation; re-fetch to resolve it for assignment.
+    created = jellyfin_api_service.get_virtual_folder_by_name(name)
+    return created.get("ItemId") if created else None
+
+
+def create_recommendation_libraries_for_user(user: UserDto, create_movie_library: bool, create_series_library: bool):
+    global ROOT_RECOMMENDATIONS_DIR_PATH
+
+    user_name = user.get("Name")
+    user_id = user.get("Id")
+
+    if create_movie_library:
+        item_id = _ensure_library(
+            f"Discover - Movies ({user_name})",
+            f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{user_name}/movies",
+            "movies",
+        )
+        if item_id:
+            jellyfin_api_service.add_library_to_user(user_id, item_id)
+
+    if create_series_library:
+        item_id = _ensure_library(
+            f"Discover - Shows ({user_name})",
+            f"{ROOT_RECOMMENDATIONS_DIR_PATH}/{user_name}/series",
+            "tvshows",
+        )
+        if item_id:
+            jellyfin_api_service.add_library_to_user(user_id, item_id)
+
+
+def create_shared_recommendation_libraries(users: List[UserDto], include_popular_movies: bool, include_upcoming_movies: bool, include_popular_series: bool):
+    """Create the shared Popular/Upcoming libraries and grant access to every
+    recommended user. Each library is only created for folders that were actually
+    generated this run."""
+    global ROOT_RECOMMENDATIONS_DIR_PATH
+
+    shared_libraries = []
+    if include_popular_movies:
+        shared_libraries.append(("Popular Movies", f"{ROOT_RECOMMENDATIONS_DIR_PATH}/popular-movies", "movies"))
+    if include_upcoming_movies:
+        shared_libraries.append(("Upcoming Movies", f"{ROOT_RECOMMENDATIONS_DIR_PATH}/upcoming-movies", "movies"))
+    if include_popular_series:
+        shared_libraries.append(("Popular Shows", f"{ROOT_RECOMMENDATIONS_DIR_PATH}/popular-series", "tvshows"))
+
+    for name, path, collection_type in shared_libraries:
+        item_id = _ensure_library(name, path, collection_type)
+        if not item_id:
+            continue
+        for user in users:
+            helpers.safe_call(jellyfin_api_service.add_library_to_user, user.get("Id"), item_id)
+
+
 def log_time():
     logger.info(f"Generating recommendations at {time.strftime('%H:%M:%S')}")
 
@@ -348,6 +412,8 @@ def NextUp():
         logger.info("GENERATE_REQUEST_COLLECTIONS is enabled but Seerr is not configured. Skipping request collections.")
     should_generate_request_collections = GENERATE_REQUEST_COLLECTIONS and SEERR_CONFIGURED
 
+    AUTO_CREATE_RECOMMENDATION_LIBRARIES = os.environ.get(CONFIG_KEYS['AUTO_CREATE_RECOMMENDATION_LIBRARIES'], 'false').lower() == 'true'
+
     all_jellyfin_users = jellyfin_api_service.get_users()
     users_to_recommend_for = [user for user in all_jellyfin_users if user["Name"].lower() in filtered_generated_recos_for_list or len(filtered_generated_recos_for_list) == 0]
 
@@ -370,6 +436,14 @@ def NextUp():
         if should_generate_request_collections:
             helpers.safe_call(generate_request_collection_for_user, user)
 
+        if AUTO_CREATE_RECOMMENDATION_LIBRARIES:
+            helpers.safe_call(
+                create_recommendation_libraries_for_user,
+                user,
+                not DISABLE_MOVIE_RECOMMENDATIONS,
+                not DISABLE_SERIES_RECOMMENDATIONS,
+            )
+
     if INCLUDE_POPULAR_SERIES_RECOMMENDATIONS:
         helpers.safe_call(generate_popular_series_recommendations)
 
@@ -378,6 +452,18 @@ def NextUp():
     
     if INCLUDE_UPCOMING_MOVIE_RECOMMENDATIONS:
         helpers.safe_call(generate_upcoming_movies_recommendations)
+
+    # Shared libraries point at the popular/upcoming folders generated above, so
+    # they are created only after those folders exist. Access is granted to every
+    # recommended user.
+    if AUTO_CREATE_RECOMMENDATION_LIBRARIES:
+        helpers.safe_call(
+            create_shared_recommendation_libraries,
+            users_to_recommend_for,
+            INCLUDE_POPULAR_MOVIE_RECOMMENDATIONS,
+            INCLUDE_UPCOMING_MOVIE_RECOMMENDATIONS,
+            INCLUDE_POPULAR_SERIES_RECOMMENDATIONS,
+        )
 
 def start_main_loop():
     time.tzset()

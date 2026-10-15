@@ -5,7 +5,7 @@ from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
 from constants.watchstate import WATCHSTATE_SECRET_KEYS
 from utils.fetch import make_request
-from utils.helpers import parse_jellyfin_date
+from utils.helpers import parse_watchstate_played_at
 from utils import logger
 from schemas.watchstate.watchstate import WatchStateHistory
 from typing import Optional, Dict, Any, List, cast, NamedTuple
@@ -218,11 +218,7 @@ def get_user_watched_movies(jellyfin_user_name: str, max_lookback_days: int = No
         last_played = jellyfin_metadata.get("played_at")
         if not last_played:
             continue
-        last_played_date = None
-        try:
-             last_played_date = date.fromisoformat(parse_jellyfin_date(last_played))
-        except (ValueError, AttributeError):
-             last_played_date = date.fromtimestamp(int(last_played))
+        last_played_date = parse_watchstate_played_at(last_played)
 
         if not max_lookback_days or last_played_date > max_days_ago:
             last_x_day_movie_list.append(movie)
@@ -273,11 +269,7 @@ def get_user_watched_series(jellyfin_user_name: str, max_lookback_days: int = No
         last_played = jellyfin_metadata.get("played_at")
         if not last_played:
             continue
-        last_played_date = None
-        try:
-             last_played_date = date.fromisoformat(parse_jellyfin_date(last_played))
-        except (ValueError, AttributeError):
-             last_played_date = date.fromtimestamp(int(last_played))
+        last_played_date = parse_watchstate_played_at(last_played)
 
         if not max_lookback_days or last_played_date > max_days_ago:
             series_title = jellyfin_metadata.get('title')

@@ -986,6 +986,8 @@ class TestVirtualFolders(JellyfinTestBase):
         self.assertEqual(params['name'], 'Requests (bob)')
         self.assertEqual(params['collectionType'], 'mixed')
         self.assertEqual(params['paths'], ['/recs/bob/requests'])
+        # Boolean query params must be lowercase strings for Jellyfin.
+        self.assertEqual(params['refreshLibrary'], 'true')
         self.assertEqual(body['LibraryOptions'], DEFAULT_LIBRARY_OPTIONS)
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
@@ -1141,7 +1143,10 @@ class TestCreateCollection(JellyfinTestBase):
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_seed_ids_are_chunked(self, mock_req):
         mock_req.return_value = _make_mock_response({'Id': 'new-c'})
-        ids = [f'm{i}' for i in range(COLLECTION_ITEMS_BATCH_SIZE + 25)]
+        # Remainder kept within a single batch so the seed-then-add flow produces
+        # exactly two calls; cross-batch chunking of the remainder is covered by
+        # TestAddItemsToCollection.
+        ids = [f'm{i}' for i in range(COLLECTION_ITEMS_BATCH_SIZE + 5)]
         create_collection('Requests - Alice', ids)
 
         calls = mock_req.call_args_list

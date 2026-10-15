@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from typing import Callable, Any
 from utils import logger
 
@@ -32,6 +33,22 @@ def parse_jellyfin_date(date_str: str):
 
     clean_str = f"{date_str.split('T')[0]}"
     return clean_str
+
+def parse_watchstate_played_at(played_at):
+    """Resolve a WatchState `played_at` (ISO 8601 string or Unix epoch) to a date.
+
+    An all-digit epoch is handled explicitly: date.fromisoformat accepts the
+    basic `YYYYMMDD` form on Python 3.11+, so a 10-digit epoch like 1792011209
+    would otherwise be silently misread as the date 1792-01-12 instead of being
+    treated as a timestamp. Returns None for empty input."""
+    if not played_at:
+        return None
+
+    text = str(played_at)
+    if text.isdigit():
+        return date.fromtimestamp(int(text))
+
+    return date.fromisoformat(parse_jellyfin_date(text))
 
 def create_map_by_id(items, id_key):
     return {item[id_key]: item for item in items}

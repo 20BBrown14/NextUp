@@ -1115,6 +1115,15 @@ class TestVirtualFolders(JellyfinTestBase):
         self.assertIsNone(get_virtual_folder_by_name('Requests (nobody)'))
 
     @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
+    def test_get_virtual_folder_by_name_case_insensitive(self, mock_req):
+        # Looking up 'movies' resolves the existing 'Movies' and returns its actual casing.
+        mock_req.return_value = _make_mock_response([{'Name': 'Movies', 'ItemId': '1'}])
+        result = get_virtual_folder_by_name('movies')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['Name'], 'Movies')
+        self.assertEqual(result['ItemId'], '1')
+
+    @patch('services.jellyfinAPIService._make_authenticated_jellyfin_api_request')
     def test_create_library_params_and_body(self, mock_req):
         mock_req.return_value = MagicMock()
         create_library('Requests (bob)', '/recs/bob/requests')

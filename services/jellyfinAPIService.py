@@ -501,9 +501,11 @@ def get_virtual_folders() -> List[Dict[str, Any]]:
 
 
 def get_virtual_folder_by_name(name: str) -> Optional[Dict[str, Any]]:
-    """Return the virtual folder with the exact given Name, or None."""
+    """Return the virtual folder matching Name case-insensitively, or None. The
+    returned folder keeps Jellyfin's actual casing (e.g. "Movies" for "movies")."""
+    target = name.casefold()
     for folder in get_virtual_folders():
-        if folder.get("Name") == name:
+        if (folder.get("Name") or "").casefold() == target:
             return folder
     return None
 
